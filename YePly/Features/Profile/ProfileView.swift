@@ -9,6 +9,7 @@ struct ProfileView: View {
     @State private var showingSignOut = false
     @State private var showingEditor = false
     @State private var avatarURL: URL?
+    @State private var socialProfile: UserProfile?
 
     var body: some View {
         ScrollView {
@@ -58,6 +59,11 @@ struct ProfileView: View {
                 }
 
                 HStack(spacing: 10) {
+                    ProfileMetric(value: "\(socialProfile?.followerCount ?? 0)", label: "Seguidores", icon: "person.2.fill")
+                    ProfileMetric(value: "\(socialProfile?.followingCount ?? 0)", label: "Seguindo", icon: "person.badge.plus")
+                }
+
+                HStack(spacing: 10) {
                     ProfileMetric(value: "\(offlineLibrary.downloadedPlaylistCount)", label: "Playlists offline", icon: "arrow.down.circle.fill")
                     ProfileMetric(value: formattedOfflineSize, label: "No aparelho", icon: "internaldrive.fill")
                 }
@@ -90,6 +96,10 @@ struct ProfileView: View {
             if let profile = session.profile { ProfileEditorView(profile: profile) }
         }
         .task(id: session.profile?.avatarPath) { avatarURL = await session.avatarURL() }
+        .task(id: session.profile?.id) {
+            guard offlineLibrary.isConnected, let id = session.profile?.id else { return }
+            socialProfile = try? await container.repository.fetchProfile(id: id)
+        }
         .confirmationDialog("Sair do YePly?", isPresented: $showingSignOut, titleVisibility: .visible) {
             Button("Sair", role: .destructive) { Task { await session.signOut() } }
             Button("Cancelar", role: .cancel) {}
@@ -248,15 +258,20 @@ private struct ProfileEditorView: View {
     }
 
     private func makeAvatarJPEG(_ image: UIImage) -> Data? {
-        guard let source = image.cgImage else { return image.jpegData(compressionQuality: 0.82) }
-        let side = min(source.width, source.height)
-        let crop = CGRect(x: (source.width - side) / 2, y: (source.height - side) / 2, width: side, height: side)
-        guard let cropped = source.cropping(to: crop) else { return image.jpegData(compressionQuality: 0.82) }
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        let target = CGSize(width: 720, height: 720)
+        let scale = max(target.width / image.size.width, target.height / image.size.height)
+        let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let origin = CGPoint(x: (target.width - drawSize.width) / 2, y: (target.height - drawSize.height) / 2)
         let format = UIGraphicsImageRendererFormat()
         format.opaque = true
         format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 720, height: 720), format: format)
-        let normalized = renderer.image { _ in UIImage(cgImage: cropped).draw(in: CGRect(x: 0, y: 0, width: 720, height: 720)) }
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
+        let normalized = renderer.image { context in
+            UIColor.black.setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: target))
+            image.draw(in: CGRect(origin: origin, size: drawSize))
+        }
         return normalized.jpegData(compressionQuality: 0.84)
     }
 }

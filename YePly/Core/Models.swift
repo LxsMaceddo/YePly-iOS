@@ -15,6 +15,9 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
     var tastes: [String]?
     var role: UserRole
     var createdAt: Date?
+    var followerCount: Int? = nil
+    var followingCount: Int? = nil
+    var isFollowed: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -25,6 +28,9 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
         case tastes
         case role
         case createdAt = "created_at"
+        case followerCount = "follower_count"
+        case followingCount = "following_count"
+        case isFollowed = "is_followed"
     }
 }
 
@@ -63,6 +69,9 @@ struct Playlist: Codable, Identifiable, Hashable, Sendable {
     var createdAt: Date?
     var updatedAt: Date?
     var trackCount: Int?
+    var viewCount: Int? = nil
+    var followerCount: Int? = nil
+    var isFollowed: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -77,6 +86,9 @@ struct Playlist: Codable, Identifiable, Hashable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case trackCount = "track_count"
+        case viewCount = "view_count"
+        case followerCount = "follower_count"
+        case isFollowed = "is_followed"
     }
 }
 
@@ -93,6 +105,9 @@ struct Track: Codable, Identifiable, Hashable, Sendable {
     var position: Int
     var fileSizeBytes: Int64?
     var createdAt: Date?
+    var likeCount: Int? = nil
+    var commentCount: Int? = nil
+    var isLiked: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -107,11 +122,86 @@ struct Track: Codable, Identifiable, Hashable, Sendable {
         case position
         case fileSizeBytes = "file_size_bytes"
         case createdAt = "created_at"
+        case likeCount = "like_count"
+        case commentCount = "comment_count"
+        case isLiked = "is_liked"
     }
 
     var formattedDuration: String {
         let seconds = max(0, Int(durationSeconds.rounded()))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+struct ArtistSummary: Codable, Identifiable, Hashable, Sendable {
+    let artistKey: String
+    let artistName: String
+    let playlistCount: Int
+    let trackCount: Int
+    var followerCount: Int
+    var isFollowed: Bool
+
+    var id: String { artistKey }
+
+    enum CodingKeys: String, CodingKey {
+        case artistKey = "artist_key"
+        case artistName = "artist_name"
+        case playlistCount = "playlist_count"
+        case trackCount = "track_count"
+        case followerCount = "follower_count"
+        case isFollowed = "is_followed"
+    }
+}
+
+struct TrackComment: Codable, Identifiable, Hashable, Sendable {
+    let id: UUID
+    let trackId: UUID
+    let userId: UUID
+    let body: String
+    let createdAt: Date
+    let updatedAt: Date
+    let displayName: String
+    let username: String
+    let avatarPath: String?
+    var likeCount: Int
+    var isLiked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case trackId = "track_id"
+        case userId = "user_id"
+        case body
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case displayName = "display_name"
+        case username
+        case avatarPath = "avatar_path"
+        case likeCount = "like_count"
+        case isLiked = "is_liked"
+    }
+}
+
+struct TrackSocialSummary: Codable, Sendable {
+    let likeCount: Int
+    let commentCount: Int
+    let isLiked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case likeCount = "like_count"
+        case commentCount = "comment_count"
+        case isLiked = "is_liked"
+    }
+}
+
+struct NewTrackComment: Encodable, Sendable {
+    let trackId: UUID
+    let userId: UUID
+    let body: String
+
+    enum CodingKeys: String, CodingKey {
+        case trackId = "track_id"
+        case userId = "user_id"
+        case body
     }
 }
 

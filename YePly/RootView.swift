@@ -38,14 +38,17 @@ struct MainTabView: View {
             NavigationStack { LibraryView(initialScope: .shared) }
                 .tabItem { Label("Compartilhadas", systemImage: "person.2.fill") }
                 .tag(1)
+            NavigationStack { DiscoveryView() }
+                .tabItem { Label("Descobrir", systemImage: "magnifyingglass") }
+                .tag(2)
             if session.isAdmin {
                 NavigationStack { AdminDashboardView() }
                     .tabItem { Label("Admin", systemImage: "slider.horizontal.3") }
-                    .tag(2)
+                    .tag(3)
             }
             NavigationStack { ProfileView() }
                 .tabItem { Label("Perfil", systemImage: "person.crop.circle") }
-                .tag(3)
+                .tag(4)
         }
         .tint(.white)
         .safeAreaInset(edge: .top, spacing: 0) {

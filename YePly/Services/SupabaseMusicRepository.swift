@@ -3,6 +3,18 @@ import Supabase
 
 private struct ShareTokenInput: Encodable { let pToken: UUID; enum CodingKeys: String, CodingKey { case pToken = "p_token" } }
 private struct LibraryInput: Encodable { let pScope: String; enum CodingKeys: String, CodingKey { case pScope = "p_scope" } }
+private struct SearchInput: Encodable {
+    let pQuery: String
+    let pLimit: Int
+    enum CodingKeys: String, CodingKey { case pQuery = "p_query"; case pLimit = "p_limit" }
+}
+private struct ProfileIDInput: Encodable { let pProfileId: UUID; enum CodingKeys: String, CodingKey { case pProfileId = "p_profile_id" } }
+private struct UserFollowInput: Encodable { let pUserId: UUID; enum CodingKeys: String, CodingKey { case pUserId = "p_user_id" } }
+private struct PlaylistIDInput: Encodable { let pPlaylistId: UUID; enum CodingKeys: String, CodingKey { case pPlaylistId = "p_playlist_id" } }
+private struct TrackIDInput: Encodable { let pTrackId: UUID; enum CodingKeys: String, CodingKey { case pTrackId = "p_track_id" } }
+private struct CommentIDInput: Encodable { let pCommentId: UUID; enum CodingKeys: String, CodingKey { case pCommentId = "p_comment_id" } }
+private struct ArtistNameInput: Encodable { let pArtistName: String; enum CodingKeys: String, CodingKey { case pArtistName = "p_artist_name" } }
+private struct ArtistKeyInput: Encodable { let pArtistKey: String; enum CodingKeys: String, CodingKey { case pArtistKey = "p_artist_key" } }
 private struct PlaylistUpdate: Encodable {
     let title: String
     let artistName: String
@@ -22,11 +34,11 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func fetchPlaylist(id: UUID) async throws -> Playlist {
-        try await client.from("playlists").select().eq("id", value: id).single().execute().value
+        try await client.rpc("playlist_with_social", params: PlaylistIDInput(pPlaylistId: id)).single().execute().value
     }
 
     func fetchTracks(playlistID: UUID) async throws -> [Track] {
-        try await client.from("tracks").select().eq("playlist_id", value: playlistID).order("position", ascending: true).execute().value
+        try await client.rpc("playlist_tracks_with_social", params: PlaylistIDInput(pPlaylistId: playlistID)).execute().value
     }
 
     func acceptSharedPlaylist(token: UUID) async throws -> Playlist {
@@ -95,6 +107,68 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func signedAudioURL(for track: Track) async throws -> URL { try await signedURL(bucket: "audio", path: track.audioPath) }
     func signedCoverURL(path: String) async throws -> URL { try await signedURL(bucket: "covers", path: path) }
+    func signedAvatarURL(path: String) async throws -> URL { try await signedURL(bucket: "avatars", path: path) }
+
+    func searchProfiles(query: String) async throws -> [UserProfile] {
+        try await client.rpc("search_profiles", params: SearchInput(pQuery: query, pLimit: 30)).execute().value
+    }
+
+    func fetchProfile(id: UUID) async throws -> UserProfile {
+        try await client.rpc("profile_with_social", params: ProfileIDInput(pProfileId: id)).single().execute().value
+    }
+
+    func toggleUserFollow(userID: UUID) async throws -> Bool {
+        try await client.rpc("toggle_user_follow", params: UserFollowInput(pUserId: userID)).execute().value
+    }
+
+    func searchArtists(query: String) async throws -> [ArtistSummary] {
+        try await client.rpc("search_artists", params: SearchInput(pQuery: query, pLimit: 30)).execute().value
+    }
+
+    func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist] {
+        try await client.rpc("artist_playlists", params: ArtistKeyInput(pArtistKey: artistKey)).execute().value
+    }
+
+    func toggleArtistFollow(artistName: String) async throws -> Bool {
+        try await client.rpc("toggle_artist_follow", params: ArtistNameInput(pArtistName: artistName)).execute().value
+    }
+
+    func searchPlaylists(query: String) async throws -> [Playlist] {
+        try await client.rpc("search_playlists", params: SearchInput(pQuery: query, pLimit: 40)).execute().value
+    }
+
+    func togglePlaylistFollow(playlistID: UUID) async throws -> Bool {
+        try await client.rpc("toggle_playlist_follow", params: PlaylistIDInput(pPlaylistId: playlistID)).execute().value
+    }
+
+    func recordPlaylistView(playlistID: UUID) async throws -> Int {
+        try await client.rpc("record_playlist_view", params: PlaylistIDInput(pPlaylistId: playlistID)).execute().value
+    }
+
+    func toggleTrackLike(trackID: UUID) async throws -> Bool {
+        try await client.rpc("toggle_track_like", params: TrackIDInput(pTrackId: trackID)).execute().value
+    }
+
+    func fetchTrackComments(trackID: UUID) async throws -> [TrackComment] {
+        try await client.rpc("track_comments_with_social", params: TrackIDInput(pTrackId: trackID)).execute().value
+    }
+
+    func addTrackComment(trackID: UUID, userID: UUID, body: String) async throws {
+        let comment = NewTrackComment(trackId: trackID, userId: userID, body: body)
+        try await client.from("track_comments").insert(comment).execute()
+    }
+
+    func deleteTrackComment(commentID: UUID) async throws {
+        try await client.from("track_comments").delete().eq("id", value: commentID).execute()
+    }
+
+    func toggleCommentLike(commentID: UUID) async throws -> Bool {
+        try await client.rpc("toggle_comment_like", params: CommentIDInput(pCommentId: commentID)).execute().value
+    }
+
+    func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary {
+        try await client.rpc("track_social_summary", params: TrackIDInput(pTrackId: trackID)).single().execute().value
+    }
 
     private func signedURL(bucket: String, path: String) async throws -> URL {
         let key = "\(bucket):\(path)"

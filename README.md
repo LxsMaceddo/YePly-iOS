@@ -22,6 +22,11 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 - Indicadores nas playlists e faixas já baixadas
 - Reprodução local, capas e fila funcionando sem consultar o Supabase
 - Perfil social editável com foto, nome, biografia e até 12 gostos musicais
+- Busca integrada de usuários, artistas e playlists na aba Descobrir
+- Sistema de seguir usuários, artistas e playlists, com contadores sociais
+- Curtidas e comentários em cada música, incluindo curtidas nos comentários
+- Visualizações únicas nas playlists e indicadores de curtidas nas faixas
+- Tratamento automático da orientação da foto de perfil antes do upload
 - Nome de usuário permanente protegido também por trigger no PostgreSQL
 - Reprodução em segundo plano
 - Links `https://yeply.app/p/<token>` e fallback `yeply://playlist/<token>`
@@ -40,7 +45,7 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 ## Configuração rápida
 
 1. Crie um projeto no Supabase.
-2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute pelo menos `202608080003_offline_social_profiles.sql` para habilitar foto, biografia, gostos e o bucket privado de avatares.
+2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute `202608080003_offline_social_profiles.sql` e depois `202608080004_social_graph.sql`.
 3. Crie sua conta pelo aplicativo e depois execute `supabase/promote-admin.sql`, substituindo o e-mail.
 4. Em `YePly/Support/AppConfig.plist`, informe a URL e a **publishable key** do projeto. Nunca coloque a `service_role` no aplicativo.
 5. No Supabase Auth, mantenha a confirmação de e-mail ativada e adicione `yeply://auth/callback` aos Redirect URLs.

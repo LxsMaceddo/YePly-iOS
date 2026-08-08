@@ -18,6 +18,16 @@ final class PlaylistDetailViewModel: ObservableObject {
         catch { errorMessage = error.localizedDescription }
     }
 
+    func toggleLike(_ track: Track, repository: any MusicRepository) async {
+        do {
+            let liked = try await repository.toggleTrackLike(trackID: track.id)
+            guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
+            let previous = tracks[index].isLiked ?? false
+            tracks[index].isLiked = liked
+            tracks[index].likeCount = max(0, (tracks[index].likeCount ?? 0) + (liked && !previous ? 1 : !liked && previous ? -1 : 0))
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func useOffline(_ tracks: [Track]) {
         self.tracks = tracks
         isLoading = false
@@ -35,9 +45,21 @@ struct PlaylistDetailView: View {
     @State private var showingUpload = false
     @State private var showingEdit = false
     @State private var informationTrack: Track?
+    @State private var commentsTrack: Track?
+    @State private var isPlaylistFollowed: Bool
+    @State private var playlistFollowerCount: Int
+    @State private var playlistViewCount: Int
+    @State private var didRecordView = false
     let playlist: Playlist
 
     private var canManage: Bool { playlist.ownerId == session.userID || session.isAdmin }
+
+    init(playlist: Playlist) {
+        self.playlist = playlist
+        _isPlaylistFollowed = State(initialValue: playlist.isFollowed ?? false)
+        _playlistFollowerCount = State(initialValue: playlist.followerCount ?? 0)
+        _playlistViewCount = State(initialValue: playlist.viewCount ?? 0)
+    }
 
     var body: some View {
         ScrollView {
@@ -48,6 +70,11 @@ struct PlaylistDetailView: View {
                         Text(playlist.title).font(.system(size: 29, weight: .bold, design: .rounded)).multilineTextAlignment(.center)
                         Text(playlist.artistName).font(.subheadline).foregroundStyle(YePlyTheme.secondary)
                         if let summary = playlist.summary { Text(summary).font(.footnote).foregroundStyle(YePlyTheme.secondary).multilineTextAlignment(.center).padding(.top, 3) }
+                        HStack(spacing: 14) {
+                            Label("\(playlistViewCount)", systemImage: "eye.fill")
+                            Label("\(playlistFollowerCount)", systemImage: "person.2.fill")
+                        }
+                        .font(.caption.weight(.semibold)).foregroundStyle(YePlyTheme.tertiary).padding(.top, 3)
                     }
                     HStack(spacing: 12) {
                         Button { if let first = model.tracks.first { play(first) } } label: {
@@ -63,6 +90,15 @@ struct PlaylistDetailView: View {
                             Image(systemName: "lock.fill").foregroundStyle(YePlyTheme.secondary).frame(width: 46, height: 46).background(YePlyTheme.elevatedStrong, in: Circle())
                         }
                         Menu {
+                            if !canManage {
+                                Button {
+                                    Task { await togglePlaylistFollow() }
+                                } label: {
+                                    Label(isPlaylistFollowed ? "Deixar de seguir playlist" : "Seguir playlist", systemImage: isPlaylistFollowed ? "person.badge.minus" : "person.badge.plus")
+                                }
+                                .disabled(!offlineLibrary.isConnected)
+                                Divider()
+                            }
                             switch offlineLibrary.state(for: playlist.id) {
                             case .notDownloaded, .failed:
                                 Button {
@@ -130,6 +166,7 @@ struct PlaylistDetailView: View {
                                 isPlaying: player.isPlaying,
                                 isAvailableOffline: offlineLibrary.isTrackDownloaded(track),
                                 isDownloading: downloadManager.downloadingTrackID == track.id,
+                                canUseSocial: offlineLibrary.isConnected,
                                 onPlay: { play(track) },
                                 onPlayNext: {
                                     player.playNext(track, repository: container.repository, artworkPath: playlist.coverPath, collectionTitle: playlist.title)
@@ -141,6 +178,8 @@ struct PlaylistDetailView: View {
                                     Task { await downloadManager.prepare(track: track, repository: container.repository, localURL: offlineLibrary.localAudioURL(for: track)) }
                                 },
                                 onInformation: { informationTrack = track },
+                                onLike: { Task { await model.toggleLike(track, repository: container.repository) } },
+                                onComments: { commentsTrack = track },
                                 onDelete: canManage && offlineLibrary.isConnected ? {
                                     Task { await model.delete(track, repository: container.repository) }
                                 } : nil
@@ -157,8 +196,10 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingUpload) { UploadTrackView(playlist: playlist, nextPosition: model.tracks.count) { Task { await model.load(playlistID: playlist.id, repository: container.repository) } } }
         .sheet(isPresented: $showingEdit) { PlaylistEditorView(playlist: playlist) }
         .sheet(item: $informationTrack) { track in TrackInformationView(track: track, playlist: playlist) }
+        .sheet(item: $commentsTrack, onDismiss: { Task { await loadTracks() } }) { track in TrackCommentsView(track: track) }
         .sheet(item: $downloadManager.exportedFile) { file in ActivityShareSheet(items: [file.url]) }
         .task(id: detailLoadKey) { await loadTracks() }
+        .task(id: playlist.id) { await recordView() }
         .alert("Não foi possível concluir", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
         .alert("Não foi possível baixar", isPresented: Binding(get: { downloadManager.errorMessage != nil }, set: { if !$0 { downloadManager.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(downloadManager.errorMessage ?? "") }
         .alert("Download offline", isPresented: Binding(get: { offlineLibrary.errorMessage != nil }, set: { if !$0 { offlineLibrary.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(offlineLibrary.errorMessage ?? "") }
@@ -218,6 +259,22 @@ struct PlaylistDetailView: View {
         }
     }
 
+    private func togglePlaylistFollow() async {
+        do {
+            let previous = isPlaylistFollowed
+            let followed = try await container.repository.togglePlaylistFollow(playlistID: playlist.id)
+            isPlaylistFollowed = followed
+            playlistFollowerCount = max(0, playlistFollowerCount + (followed && !previous ? 1 : !followed && previous ? -1 : 0))
+        } catch { model.errorMessage = error.localizedDescription }
+    }
+
+    private func recordView() async {
+        guard !didRecordView, offlineLibrary.isConnected else { return }
+        didRecordView = true
+        do { playlistViewCount = try await container.repository.recordPlaylistView(playlistID: playlist.id) }
+        catch { didRecordView = false }
+    }
+
     private var shareURL: URL {
         AppConfiguration.current.universalLinkBase.appending(path: playlist.shareToken.uuidString.lowercased())
     }
@@ -230,11 +287,14 @@ private struct TrackRow: View {
     let isPlaying: Bool
     let isAvailableOffline: Bool
     let isDownloading: Bool
+    let canUseSocial: Bool
     let onPlay: () -> Void
     let onPlayNext: () -> Void
     let onAddToQueue: () -> Void
     let onDownload: () -> Void
     let onInformation: () -> Void
+    let onLike: () -> Void
+    let onComments: () -> Void
     let onDelete: (() -> Void)?
 
     var body: some View {
@@ -250,19 +310,31 @@ private struct TrackRow: View {
                         Text(track.artistName).font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
                     }
                     Spacer()
-                    if isAvailableOffline {
-                        Image(systemName: "arrow.down.circle.fill").font(.caption).foregroundStyle(YePlyTheme.accent)
-                    }
-                    Text(track.formattedDuration).font(.caption.monospacedDigit()).foregroundStyle(YePlyTheme.tertiary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
+            if isAvailableOffline {
+                Image(systemName: "arrow.down.circle.fill").font(.caption).foregroundStyle(YePlyTheme.accent)
+            }
+            Button(action: onComments) {
+                Label("\(track.commentCount ?? 0)", systemImage: "bubble.left")
+                    .labelStyle(.titleAndIcon).font(.caption2).foregroundStyle(YePlyTheme.tertiary)
+            }
+            .buttonStyle(.plain).disabled(!canUseSocial)
+            .accessibilityLabel("Comentários, \(track.commentCount ?? 0)")
+            Text(track.formattedDuration).font(.caption.monospacedDigit()).foregroundStyle(YePlyTheme.tertiary)
+
             Menu {
                 Button("Tocar agora", systemImage: "play.fill", action: onPlay)
                 Button("Tocar a seguir", systemImage: "text.line.first.and.arrowtriangle.forward", action: onPlayNext)
                 Button("Adicionar ao final da fila", systemImage: "text.badge.plus", action: onAddToQueue)
+                Divider()
+                Button(track.isLiked == true ? "Remover curtida" : "Curtir música", systemImage: track.isLiked == true ? "heart.slash" : "heart", action: onLike)
+                    .disabled(!canUseSocial)
+                Button("Comentários (\(track.commentCount ?? 0))", systemImage: "bubble.left", action: onComments)
+                    .disabled(!canUseSocial)
                 Divider()
                 Button("Baixar ou salvar MP3", systemImage: "arrow.down.circle", action: onDownload)
                 Button("Informações da música", systemImage: "info.circle", action: onInformation)
@@ -306,6 +378,8 @@ private struct TrackInformationView: View {
                     .padding(.vertical, 8)
                 }
                 Section("Detalhes") {
+                    LabeledContent("Curtidas", value: "\(track.likeCount ?? 0)")
+                    LabeledContent("Comentários", value: "\(track.commentCount ?? 0)")
                     LabeledContent("Duração", value: track.formattedDuration)
                     LabeledContent("Posição", value: "\(track.position + 1)")
                     if let size = track.fileSizeBytes { LabeledContent("Tamanho", value: ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
