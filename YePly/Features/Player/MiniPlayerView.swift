@@ -37,6 +37,9 @@ struct MiniPlayerView: View {
             }
             .padding(8)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .overlay(alignment: .top) {
+                Capsule().fill(.white.opacity(0.32)).frame(width: 28, height: 3).padding(.top, 3)
+            }
             .overlay(alignment: .bottomLeading) {
                 GeometryReader { geometry in
                     Capsule().fill(YePlyTheme.accent)

@@ -14,7 +14,11 @@ Data: 8 de agosto de 2026
 - Grade da biblioteca conferida com duas colunas flexíveis e largura igual por cartão.
 - Menus de faixa conferidos para tocar agora, tocar a seguir, adicionar à fila, exportar MP3, ver informações e excluir quando autorizado.
 - Mini player, tela completa, busca na linha do tempo, controles anterior/próxima, repetição e visualização da fila analisados pelo parser.
-- Workflow atualizado para `actions/checkout@v5`, `actions/upload-artifact@v6` e artefato `YePly-1.1.0-unsigned.ipa`.
+- Workflow atualizado para `actions/checkout@v5`, `actions/upload-artifact@v6` e artefato `YePly-1.1.1-unsigned.ipa`.
+- Saudação conferida usando `profiles.username`, removendo o arroba e exibindo em maiúsculas.
+- Mini player reposicionado acima da barra de abas, com gesto vertical para esconder e controle para restaurar.
+- Novo logo conferido nos componentes SwiftUI e no AppIcon de 1024 × 1024, RGB e sem transparência.
+- Versão atualizada para 1.1.1 (build 3).
 
 ## Limite desta validação
 

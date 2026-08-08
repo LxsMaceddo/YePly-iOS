@@ -22,20 +22,13 @@ enum YePlyTheme {
 struct YePlyLogo: View {
     var size: CGFloat = 34
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.29, style: .continuous)
-                .fill(.white)
-            Path { path in
-                path.move(to: CGPoint(x: size * 0.23, y: size * 0.27))
-                path.addLine(to: CGPoint(x: size * 0.5, y: size * 0.47))
-                path.addLine(to: CGPoint(x: size * 0.77, y: size * 0.27))
-                path.move(to: CGPoint(x: size * 0.23, y: size * 0.50))
-                path.addLine(to: CGPoint(x: size * 0.5, y: size * 0.70))
-                path.addLine(to: CGPoint(x: size * 0.77, y: size * 0.50))
-            }
-            .stroke(YePlyTheme.background, style: StrokeStyle(lineWidth: size * 0.11, lineCap: .round, lineJoin: .round))
-        }
+        Image("YePlyBrand")
+            .resizable()
+            .interpolation(.high)
+            .antialiased(true)
+            .scaledToFit()
         .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
     }
 }
 

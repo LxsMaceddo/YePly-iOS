@@ -13,7 +13,10 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 - Upload de capa pela fototeca
 - Player com fila, avançar/voltar e controles na tela bloqueada
 - Player completo com capa, progresso, repetição e lista de próximas músicas
+- Mini player acima das abas, com gesto para baixo e botão compacto para restaurá-lo
 - Menu de faixa para tocar agora, tocar a seguir, adicionar à fila, ver informações e salvar o MP3
+- Saudação da biblioteca usando o nome de usuário do perfil
+- Logo oficial do YePly aplicado no aplicativo e no ícone do iPhone
 - Reprodução em segundo plano
 - Links `https://yeply.app/p/<token>` e fallback `yeply://playlist/<token>`
 - Área administrativa por função protegida no JWT

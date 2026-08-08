@@ -75,7 +75,7 @@ struct LibraryView: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("BIBLIOTECA").font(.caption2.weight(.bold)).tracking(2).foregroundStyle(YePlyTheme.tertiary)
-                    Text("Olá, \(session.profile?.displayName.components(separatedBy: " ").first ?? "você")")
+                    Text("Olá, \(greetingUsername)")
                         .font(.system(size: 34, weight: .bold, design: .rounded)).tracking(-1.2)
                 }
                 Spacer()
@@ -92,6 +92,14 @@ struct LibraryView: View {
             .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .padding(.top, 18)
+    }
+
+    private var greetingUsername: String {
+        let rawUsername = session.profile?.username ?? ""
+        let username = rawUsername
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        return username.isEmpty ? "você" : username.uppercased()
     }
 
     private var scopePicker: some View {
