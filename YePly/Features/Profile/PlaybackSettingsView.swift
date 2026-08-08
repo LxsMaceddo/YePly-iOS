@@ -5,7 +5,7 @@ struct PlaybackSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Transição entre músicas") {
+            Section {
                 Toggle("Reprodução sem atraso", isOn: $player.gaplessPlaybackEnabled)
                 Picker("Fade in e fade out", selection: $player.fadeDuration) {
                     Text("Desativado").tag(0.0)
@@ -14,6 +14,8 @@ struct PlaybackSettingsView: View {
                     Text("3 segundos").tag(3.0)
                     Text("5 segundos").tag(5.0)
                 }
+            } header: {
+                Text("Transição entre músicas")
             } footer: {
                 Text("Sem atraso prepara a próxima música antes da atual terminar. O fade suaviza a entrada e a saída do áudio.")
             }
