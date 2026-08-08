@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Abrir no YePly</title>
+<style>body{margin:0;background:#09090a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;min-height:100vh;place-items:center}.card{width:min(88vw,420px);text-align:center}.logo{width:72px;height:72px;border-radius:22px;background:#fff;color:#09090a;display:grid;place-items:center;margin:auto;font-size:30px;font-weight:900}h1{font-size:40px;margin:22px 0 8px}p{color:#999;line-height:1.5}.button{display:block;background:#fff;color:#111;text-decoration:none;font-weight:750;border-radius:15px;padding:16px;margin-top:28px}</style></head>
+<body><main class="card"><div class="logo">Y</div><h1>YePly</h1><p>Abra esta playlist no aplicativo para ouvir e guardar na sua biblioteca.</p><a class="button" id="open" href="#">Abrir no YePly</a></main><script>const token=location.pathname.split('/').filter(Boolean).pop();document.getElementById('open').href='yeply://playlist/'+encodeURIComponent(token||'');</script></body>
+</html>
