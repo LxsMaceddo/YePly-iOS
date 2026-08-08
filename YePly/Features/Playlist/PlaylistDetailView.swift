@@ -17,12 +17,19 @@ final class PlaylistDetailViewModel: ObservableObject {
         do { try await repository.deleteTrack(track); tracks.removeAll { $0.id == track.id } }
         catch { errorMessage = error.localizedDescription }
     }
+
+    func useOffline(_ tracks: [Track]) {
+        self.tracks = tracks
+        isLoading = false
+        errorMessage = nil
+    }
 }
 
 struct PlaylistDetailView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     @StateObject private var model = PlaylistDetailViewModel()
     @StateObject private var downloadManager = TrackFileDownloadManager()
     @State private var showingUpload = false
@@ -55,13 +62,49 @@ struct PlaylistDetailView: View {
                         } else {
                             Image(systemName: "lock.fill").foregroundStyle(YePlyTheme.secondary).frame(width: 46, height: 46).background(YePlyTheme.elevatedStrong, in: Circle())
                         }
-                        if canManage {
-                            Menu {
-                                Button("Editar playlist", systemImage: "pencil") { showingEdit = true }
-                                Button("Adicionar MP3", systemImage: "plus") { showingUpload = true }
-                            } label: { Image(systemName: "ellipsis").frame(width: 46, height: 46).background(YePlyTheme.elevatedStrong, in: Circle()) }
+                        Menu {
+                            switch offlineLibrary.state(for: playlist.id) {
+                            case .notDownloaded, .failed:
+                                Button {
+                                    Task { await offlineLibrary.downloadPlaylist(playlist, tracks: model.tracks, repository: container.repository) }
+                                } label: {
+                                    Label("Baixar para ouvir offline", systemImage: "arrow.down.circle")
+                                }
+                                .disabled(model.tracks.isEmpty || !offlineLibrary.isConnected)
+                            case .downloading(let progress):
+                                Button {} label: {
+                                    Label("Baixando… \(Int(progress * 100))%", systemImage: "arrow.down.circle")
+                                }
+                                .disabled(true)
+                            case .downloaded:
+                                Button {
+                                    Task { await offlineLibrary.downloadPlaylist(playlist, tracks: model.tracks, repository: container.repository) }
+                                } label: {
+                                    Label("Atualizar download", systemImage: "arrow.clockwise.circle")
+                                }
+                                .disabled(model.tracks.isEmpty || !offlineLibrary.isConnected)
+                                Button(role: .destructive) { offlineLibrary.removeDownload(for: playlist.id) } label: {
+                                    Label("Remover download", systemImage: "trash")
+                                }
+                            }
+                            if canManage {
+                                Divider()
+                                Button("Editar playlist", systemImage: "pencil") { showingEdit = true }.disabled(!offlineLibrary.isConnected)
+                                Button("Adicionar MP3", systemImage: "plus") { showingUpload = true }.disabled(!offlineLibrary.isConnected)
+                            }
+                        } label: {
+                            ZStack {
+                                Image(systemName: "ellipsis")
+                                if case .downloading(let progress) = offlineLibrary.state(for: playlist.id) {
+                                    Circle().trim(from: 0, to: progress).stroke(YePlyTheme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.25), value: progress)
+                                }
+                            }
+                            .frame(width: 46, height: 46)
+                            .background(YePlyTheme.elevatedStrong, in: Circle())
                         }
                     }
+
+                    offlineStatus
                 }
                 .frame(maxWidth: .infinity)
 
@@ -85,6 +128,7 @@ struct PlaylistDetailView: View {
                                 track: track,
                                 isCurrent: player.currentTrack?.id == track.id,
                                 isPlaying: player.isPlaying,
+                                isAvailableOffline: offlineLibrary.isTrackDownloaded(track),
                                 isDownloading: downloadManager.downloadingTrackID == track.id,
                                 onPlay: { play(track) },
                                 onPlayNext: {
@@ -94,10 +138,10 @@ struct PlaylistDetailView: View {
                                     player.addToQueue(track, repository: container.repository, artworkPath: playlist.coverPath, collectionTitle: playlist.title)
                                 },
                                 onDownload: {
-                                    Task { await downloadManager.prepare(track: track, repository: container.repository) }
+                                    Task { await downloadManager.prepare(track: track, repository: container.repository, localURL: offlineLibrary.localAudioURL(for: track)) }
                                 },
                                 onInformation: { informationTrack = track },
-                                onDelete: canManage ? {
+                                onDelete: canManage && offlineLibrary.isConnected ? {
                                     Task { await model.delete(track, repository: container.repository) }
                                 } : nil
                             )
@@ -114,10 +158,52 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingEdit) { PlaylistEditorView(playlist: playlist) }
         .sheet(item: $informationTrack) { track in TrackInformationView(track: track, playlist: playlist) }
         .sheet(item: $downloadManager.exportedFile) { file in ActivityShareSheet(items: [file.url]) }
-        .task { await model.load(playlistID: playlist.id, repository: container.repository) }
+        .task(id: detailLoadKey) { await loadTracks() }
         .alert("Não foi possível concluir", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
         .alert("Não foi possível baixar", isPresented: Binding(get: { downloadManager.errorMessage != nil }, set: { if !$0 { downloadManager.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(downloadManager.errorMessage ?? "") }
+        .alert("Download offline", isPresented: Binding(get: { offlineLibrary.errorMessage != nil }, set: { if !$0 { offlineLibrary.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(offlineLibrary.errorMessage ?? "") }
         .yeplyBackground()
+    }
+
+    @ViewBuilder
+    private var offlineStatus: some View {
+        switch offlineLibrary.state(for: playlist.id) {
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Label("Preparando para ouvir offline", systemImage: "arrow.down.circle")
+                    Spacer()
+                    Text("\(Int(progress * 100))%").monospacedDigit().contentTransition(.numericText())
+                }
+                .font(.caption.weight(.semibold))
+                ProgressView(value: progress).tint(YePlyTheme.accent).animation(.easeInOut(duration: 0.25), value: progress)
+            }
+            .padding(14)
+            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        case .downloaded:
+            Label("Disponível offline neste iPhone", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold)).foregroundStyle(YePlyTheme.accent)
+                .padding(.horizontal, 14).frame(height: 40)
+                .background(YePlyTheme.accent.opacity(0.1), in: Capsule())
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange).multilineTextAlignment(.leading)
+        case .notDownloaded:
+            EmptyView()
+        }
+    }
+
+    private var detailLoadKey: String {
+        "\(offlineLibrary.isConnected)-\(offlineLibrary.isPlaylistDownloaded(playlist.id))"
+    }
+
+    private func loadTracks() async {
+        if offlineLibrary.isOfflineMode {
+            model.useOffline(offlineLibrary.tracks(for: playlist.id) ?? [])
+        } else {
+            await model.load(playlistID: playlist.id, repository: container.repository)
+            if model.errorMessage != nil, let cached = offlineLibrary.tracks(for: playlist.id) { model.useOffline(cached) }
+        }
     }
 
     private func play(_ track: Track) {
@@ -142,6 +228,7 @@ private struct TrackRow: View {
     let track: Track
     let isCurrent: Bool
     let isPlaying: Bool
+    let isAvailableOffline: Bool
     let isDownloading: Bool
     let onPlay: () -> Void
     let onPlayNext: () -> Void
@@ -163,6 +250,9 @@ private struct TrackRow: View {
                         Text(track.artistName).font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
                     }
                     Spacer()
+                    if isAvailableOffline {
+                        Image(systemName: "arrow.down.circle.fill").font(.caption).foregroundStyle(YePlyTheme.accent)
+                    }
                     Text(track.formattedDuration).font(.caption.monospacedDigit()).foregroundStyle(YePlyTheme.tertiary)
                 }
                 .contentShape(Rectangle())

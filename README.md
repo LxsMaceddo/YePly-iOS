@@ -17,6 +17,12 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 - Menu de faixa para tocar agora, tocar a seguir, adicionar à fila, ver informações e salvar o MP3
 - Saudação da biblioteca usando o nome de usuário do perfil
 - Logo oficial do YePly aplicado no aplicativo e no ícone do iPhone
+- Download completo de playlists para reprodução offline com progresso visual
+- Modo offline automático mostrando somente playlists disponíveis no iPhone
+- Indicadores nas playlists e faixas já baixadas
+- Reprodução local, capas e fila funcionando sem consultar o Supabase
+- Perfil social editável com foto, nome, biografia e até 12 gostos musicais
+- Nome de usuário permanente protegido também por trigger no PostgreSQL
 - Reprodução em segundo plano
 - Links `https://yeply.app/p/<token>` e fallback `yeply://playlist/<token>`
 - Área administrativa por função protegida no JWT
@@ -34,7 +40,7 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 ## Configuração rápida
 
 1. Crie um projeto no Supabase.
-2. Execute `supabase/migrations/202608070001_initial.sql` no SQL Editor.
+2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute pelo menos `202608080003_offline_social_profiles.sql` para habilitar foto, biografia, gostos e o bucket privado de avatares.
 3. Crie sua conta pelo aplicativo e depois execute `supabase/promote-admin.sql`, substituindo o e-mail.
 4. Em `YePly/Support/AppConfig.plist`, informe a URL e a **publishable key** do projeto. Nunca coloque a `service_role` no aplicativo.
 5. No Supabase Auth, mantenha a confirmação de e-mail ativada e adicione `yeply://auth/callback` aos Redirect URLs.
@@ -50,7 +56,7 @@ Se preferir regenerar o projeto, `project.yml` é compatível com XcodeGen.
 
 O workflow `.github/workflows/build-unsigned-ipa.yml` compila em um runner macOS. Depois de enviar esta pasta para a raiz de um repositório, abra **Actions → Build YePly IPA → Run workflow**. O artefato `YePly-IPA` conterá o arquivo `.ipa` sem assinatura.
 
-Um IPA sem assinatura é adequado para inspeção e posterior assinatura, mas não instala diretamente em um iPhone comum. Para instalação direta, o mesmo build precisa receber certificado Apple Distribution e provisioning profile válidos por GitHub Secrets.
+Um IPA sem assinatura é adequado para inspeção e posterior assinatura pelo AltStore ou outro serviço de sideloading.
 
 ## Administração
 

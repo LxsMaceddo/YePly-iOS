@@ -25,11 +25,13 @@ final class AudioPlayer: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var repository: (any MusicRepository)?
+    private let offlineLibrary: OfflineLibraryStore
     private var contexts: [UUID: PlaybackContext] = [:]
     private var artworkTask: Task<Void, Never>?
     private var nowPlayingArtwork: MPMediaItemArtwork?
 
-    init() {
+    init(offlineLibrary: OfflineLibraryStore) {
+        self.offlineLibrary = offlineLibrary
         configureAudioSession()
         configureRemoteCommands()
     }
@@ -155,7 +157,15 @@ final class AudioPlayer: ObservableObject {
         guard let repository else { return }
         errorMessage = nil
         do {
-            let url = try await repository.signedAudioURL(for: track)
+            let url: URL
+            if let localURL = offlineLibrary.localAudioURL(for: track) {
+                url = localURL
+            } else {
+                guard offlineLibrary.isConnected else {
+                    throw YePlyError.message("Esta música não foi baixada para ouvir offline.")
+                }
+                url = try await repository.signedAudioURL(for: track)
+            }
             let context = contexts[track.id]
             currentArtworkPath = context?.artworkPath ?? track.artworkPath
             currentCollectionTitle = context?.collectionTitle ?? track.albumName
@@ -252,6 +262,13 @@ final class AudioPlayer: ObservableObject {
 
     private func loadNowPlayingArtwork() {
         artworkTask?.cancel()
+        guard let currentTrack else { return }
+        if let localURL = offlineLibrary.localCoverURL(for: currentTrack.playlistId),
+           let data = try? Data(contentsOf: localURL), let image = UIImage(data: data) {
+            nowPlayingArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            updateNowPlaying(elapsed: elapsedTime)
+            return
+        }
         guard let path = currentArtworkPath, let repository else { return }
         artworkTask = Task { [weak self] in
             guard let self else { return }

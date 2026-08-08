@@ -11,6 +11,8 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
     var displayName: String
     var username: String
     var avatarPath: String?
+    var bio: String?
+    var tastes: [String]?
     var role: UserRole
     var createdAt: Date?
 
@@ -19,6 +21,8 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
         case displayName = "display_name"
         case username
         case avatarPath = "avatar_path"
+        case bio
+        case tastes
         case role
         case createdAt = "created_at"
     }

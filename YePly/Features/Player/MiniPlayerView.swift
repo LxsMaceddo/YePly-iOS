@@ -5,6 +5,7 @@ import UIKit
 struct MiniPlayerView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     let onOpen: () -> Void
 
     var body: some View {
@@ -55,6 +56,7 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     @StateObject private var downloadManager = TrackFileDownloadManager()
     @State private var showingQueue = false
     @State private var scrubValue: Double = 0
@@ -189,7 +191,7 @@ struct NowPlayingView: View {
             Spacer()
             Menu {
                 Button("Baixar ou compartilhar MP3", systemImage: "arrow.down.circle") {
-                    Task { await downloadManager.prepare(track: track, repository: container.repository) }
+                    Task { await downloadManager.prepare(track: track, repository: container.repository, localURL: offlineLibrary.localAudioURL(for: track)) }
                 }
                 Button("Ver fila de reprodução", systemImage: "list.bullet") { showingQueue = true }
             } label: {
@@ -282,13 +284,17 @@ private struct PlaybackQueueView: View {
 
 struct PlayerArtworkView: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     let track: Track
     let artworkPath: String?
     @State private var coverURL: URL?
+    @State private var localCoverImage: UIImage?
 
     var body: some View {
         Group {
-            if let coverURL {
+            if let localCoverImage {
+                Image(uiImage: localCoverImage).resizable().scaledToFill()
+            } else if let coverURL {
                 AsyncImage(url: coverURL) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() }
                     else { fallback }
@@ -296,10 +302,14 @@ struct PlayerArtworkView: View {
             } else { fallback }
         }
         .clipped()
-        .task(id: artworkPath ?? track.artworkPath) {
+        .task(id: "\(artworkPath ?? track.artworkPath ?? "none")-\(offlineLibrary.isTrackDownloaded(track))") {
             coverURL = nil
-            guard let path = artworkPath ?? track.artworkPath else { return }
-            coverURL = try? await container.repository.signedCoverURL(path: path)
+            localCoverImage = nil
+            if let localURL = offlineLibrary.localCoverURL(for: track.playlistId) {
+                localCoverImage = UIImage(contentsOfFile: localURL.path)
+            } else if offlineLibrary.isConnected, let path = artworkPath ?? track.artworkPath {
+                coverURL = try? await container.repository.signedCoverURL(path: path)
+            }
         }
     }
 
@@ -323,21 +333,25 @@ final class TrackFileDownloadManager: ObservableObject {
     @Published private(set) var downloadingTrackID: UUID?
     @Published var errorMessage: String?
 
-    func prepare(track: Track, repository: any MusicRepository) async {
+    func prepare(track: Track, repository: any MusicRepository, localURL: URL? = nil) async {
         guard !isDownloading else { return }
         isDownloading = true
         downloadingTrackID = track.id
         errorMessage = nil
         defer { isDownloading = false; downloadingTrackID = nil }
         do {
-            let remoteURL = try await repository.signedAudioURL(for: track)
-            let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                throw YePlyError.message("O servidor recusou o download (código \(http.statusCode)).")
-            }
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent(safeFilename(for: track))
             try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: temporaryURL, to: destination)
+            if let localURL {
+                try FileManager.default.copyItem(at: localURL, to: destination)
+            } else {
+                let remoteURL = try await repository.signedAudioURL(for: track)
+                let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    throw YePlyError.message("O servidor recusou o download (código \(http.statusCode)).")
+                }
+                try FileManager.default.moveItem(at: temporaryURL, to: destination)
+            }
             exportedFile = ExportedTrackFile(url: destination)
         } catch {
             errorMessage = error.localizedDescription

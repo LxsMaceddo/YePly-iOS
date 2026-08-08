@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 final class LibraryViewModel: ObservableObject {
@@ -12,11 +13,18 @@ final class LibraryViewModel: ObservableObject {
         do { playlists = try await repository.fetchLibrary(scope: scope); errorMessage = nil }
         catch { errorMessage = error.localizedDescription }
     }
+
+    func useOffline(_ playlists: [Playlist]) {
+        self.playlists = playlists
+        isLoading = false
+        errorMessage = nil
+    }
 }
 
 struct LibraryView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     @StateObject private var model = LibraryViewModel()
     @State private var scope: LibraryScope
     @State private var searchText = ""
@@ -42,7 +50,7 @@ struct LibraryView: View {
                     ContentUnavailableView(
                         scope == .shared ? "Nada compartilhado ainda" : "Sua biblioteca está vazia",
                         systemImage: scope == .shared ? "person.2" : "music.note.house",
-                        description: Text(scope == .shared ? "Abra um link do YePly para guardar uma playlist aqui." : "Crie uma playlist e adicione seus primeiros MP3.")
+                        description: Text(emptyDescription)
                     )
                     .padding(.top, 60)
                 } else {
@@ -63,11 +71,26 @@ struct LibraryView: View {
         }
         .navigationDestination(for: Playlist.self) { PlaylistDetailView(playlist: $0) }
         .navigationBarHidden(true)
-        .refreshable { await model.load(scope: scope, repository: container.repository) }
+        .refreshable { await loadLibrary() }
         .sheet(isPresented: $showingCreate) { CreatePlaylistView { Task { await model.load(scope: scope, repository: container.repository) } } }
-        .task(id: scope) { await model.load(scope: scope, repository: container.repository) }
+        .task(id: loadKey) { await loadLibrary() }
         .alert("Não foi possível carregar", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
         .yeplyBackground()
+    }
+
+    private var loadKey: String { "\(scope.rawValue)-\(offlineLibrary.isConnected)-\(offlineLibrary.downloadedPlaylistCount)" }
+
+    private var emptyDescription: String {
+        if offlineLibrary.isOfflineMode { return "Conecte-se à internet e baixe uma playlist para ouvi-la sem conexão." }
+        return scope == .shared ? "Abra um link do YePly para guardar uma playlist aqui." : "Crie uma playlist e adicione seus primeiros MP3."
+    }
+
+    private func loadLibrary() async {
+        if offlineLibrary.isOfflineMode {
+            model.useOffline(offlineLibrary.playlists(for: scope))
+        } else {
+            await model.load(scope: scope, repository: container.repository)
+        }
     }
 
     private var header: some View {
@@ -82,6 +105,8 @@ struct LibraryView: View {
                 Button { showingCreate = true } label: {
                     Image(systemName: "plus").font(.headline.weight(.bold)).foregroundStyle(.black).frame(width: 44, height: 44).background(.white, in: Circle())
                 }
+                .disabled(offlineLibrary.isOfflineMode)
+                .opacity(offlineLibrary.isOfflineMode ? 0.45 : 1)
             }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(YePlyTheme.tertiary)
@@ -142,12 +167,24 @@ private enum SortMode: String, CaseIterable, Identifiable {
 
 struct PlaylistCard: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     let playlist: Playlist
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             PlaylistArtworkView(playlist: playlist)
                 .frame(maxWidth: .infinity)
+                .overlay(alignment: .bottomTrailing) {
+                    if offlineLibrary.isPlaylistDownloaded(playlist.id) {
+                        Label("Offline", systemImage: "arrow.down.circle.fill")
+                            .labelStyle(.iconOnly)
+                            .font(.headline)
+                            .foregroundStyle(.black)
+                            .padding(7)
+                            .background(.white, in: Circle())
+                            .padding(8)
+                    }
+                }
             VStack(alignment: .leading, spacing: 3) {
                 Text(playlist.title).font(.subheadline.weight(.bold)).foregroundStyle(.white).lineLimit(1)
                 Text(metadata).font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
@@ -165,12 +202,16 @@ struct PlaylistCard: View {
 
 struct PlaylistArtworkView: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     let playlist: Playlist
     @State private var coverURL: URL?
+    @State private var localCoverImage: UIImage?
 
     var body: some View {
         Group {
-            if let coverURL {
+            if let localCoverImage {
+                Image(uiImage: localCoverImage).resizable().scaledToFill()
+            } else if let coverURL {
                 AsyncImage(url: coverURL) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() }
                     else { CoverArtwork(playlist: playlist) }
@@ -179,9 +220,14 @@ struct PlaylistArtworkView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .task(id: playlist.coverPath) {
-            guard let path = playlist.coverPath else { return }
-            coverURL = try? await container.repository.signedCoverURL(path: path)
+        .task(id: "\(playlist.coverPath ?? "none")-\(offlineLibrary.isPlaylistDownloaded(playlist.id))") {
+            coverURL = nil
+            localCoverImage = nil
+            if let localURL = offlineLibrary.localCoverURL(for: playlist.id) {
+                localCoverImage = UIImage(contentsOfFile: localURL.path)
+            } else if offlineLibrary.isConnected, let path = playlist.coverPath {
+                coverURL = try? await container.repository.signedCoverURL(path: path)
+            }
         }
     }
 }

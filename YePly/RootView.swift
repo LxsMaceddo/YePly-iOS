@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
 
     var body: some View {
         Group {
@@ -15,6 +16,7 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: session.state)
+        .task(id: session.userID) { offlineLibrary.activate(userID: session.userID) }
     }
 }
 
@@ -22,6 +24,7 @@ struct MainTabView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var links: DeepLinkRouter
+    @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     @State private var selection = 0
     @State private var showingNowPlaying = false
     @State private var isMiniPlayerHidden = false
@@ -45,6 +48,20 @@ struct MainTabView: View {
                 .tag(3)
         }
         .tint(.white)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if offlineLibrary.isOfflineMode {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.slash")
+                    Text("MODO OFFLINE").font(.caption2.bold()).tracking(1.3)
+                    Text("Somente downloads").font(.caption2).foregroundStyle(.white.opacity(0.72))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Color.orange.opacity(0.88))
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .bottom) { playerOverlay }
         .onChange(of: player.currentTrack?.id) { oldTrackID, newTrackID in
             if oldTrackID != newTrackID { withAnimation(.snappy) { isMiniPlayerHidden = false } }

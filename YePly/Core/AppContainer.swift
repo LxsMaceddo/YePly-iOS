@@ -6,9 +6,11 @@ final class AppContainer: ObservableObject {
     let repository: any MusicRepository
     let player: AudioPlayer
     let links: DeepLinkRouter
+    let offlineLibrary: OfflineLibraryStore
     let isDemoBackend: Bool
 
     init() {
+        offlineLibrary = OfflineLibraryStore()
         if let client = SupabaseProvider.client {
             session = SessionStore(client: client)
             repository = SupabaseMusicRepository(client: client)
@@ -18,7 +20,7 @@ final class AppContainer: ObservableObject {
             repository = DemoMusicRepository()
             isDemoBackend = true
         }
-        player = AudioPlayer()
+        player = AudioPlayer(offlineLibrary: offlineLibrary)
         links = DeepLinkRouter()
     }
 

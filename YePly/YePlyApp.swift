@@ -11,6 +11,7 @@ struct YePlyApp: App {
                 .environmentObject(container.session)
                 .environmentObject(container.player)
                 .environmentObject(container.links)
+                .environmentObject(container.offlineLibrary)
                 .onOpenURL { container.handleURL($0) }
                 .task { await container.session.start() }
         }
