@@ -26,7 +26,8 @@ private final class DiscoveryViewModel: ObservableObject {
             self.artists = try await artists
             self.playlists = try await playlists
             errorMessage = nil
-        } catch { errorMessage = error.localizedDescription }
+        } catch let error where error.isYePlyCancellation { return }
+        catch { errorMessage = error.localizedDescription }
     }
 
     func toggle(_ profile: UserProfile, repository: any MusicRepository) async {
@@ -151,7 +152,10 @@ struct DiscoveryView: View {
                             HStack(spacing: 13) {
                                 ZStack { Circle().fill(YePlyTheme.elevatedStrong); Image(systemName: "music.mic").foregroundStyle(YePlyTheme.accent) }.frame(width: 52, height: 52)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(artist.artistName).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                                    HStack(spacing: 5) {
+                                        Text(artist.artistName).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                                        if artist.isVerified { VerifiedArtistBadge() }
+                                    }
                                     Text("\(artist.followerCount) seguidores • \(artist.trackCount) músicas").font(.caption).foregroundStyle(YePlyTheme.secondary)
                                 }
                             }
@@ -202,6 +206,17 @@ struct FollowButton: View {
                 .background(isFollowing ? YePlyTheme.elevatedStrong : .white, in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct VerifiedArtistBadge: View {
+    var size: CGFloat = 15
+    var body: some View {
+        Image(systemName: "checkmark.seal.fill")
+            .font(.system(size: size, weight: .bold))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, Color(red: 0.05, green: 0.55, blue: 1))
+            .accessibilityLabel("Artista verificado")
     }
 }
 
@@ -300,6 +315,7 @@ struct PublicProfileView: View {
 
 struct ArtistDetailView: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var session: SessionStore
     @State private var current: ArtistSummary
     @State private var playlists: [Playlist] = []
     @State private var errorMessage: String?
@@ -311,8 +327,17 @@ struct ArtistDetailView: View {
         ScrollView {
             VStack(spacing: 20) {
                 ZStack { Circle().fill(YePlyTheme.elevated); Image(systemName: "music.mic").font(.system(size: 42)).foregroundStyle(YePlyTheme.accent) }.frame(width: 112, height: 112).padding(.top, 22)
-                Text(current.artistName).font(.title.bold()).multilineTextAlignment(.center)
+                HStack(spacing: 7) {
+                    Text(current.artistName).font(.title.bold()).multilineTextAlignment(.center)
+                    if current.isVerified { VerifiedArtistBadge(size: 23) }
+                }
                 FollowButton(isFollowing: current.isFollowed) { Task { await toggleFollow() } }
+                if session.isAdmin {
+                    Button { Task { await toggleVerification() } } label: {
+                        Label(current.isVerified ? "Remover verificação" : "Verificar artista", systemImage: current.isVerified ? "checkmark.seal.fill" : "checkmark.seal")
+                    }
+                    .buttonStyle(.bordered).tint(.blue)
+                }
                 HStack(spacing: 10) {
                     metric(current.followerCount, "Seguidores")
                     metric(current.trackCount, "Músicas")
@@ -347,5 +372,10 @@ struct ArtistDetailView: View {
             current.isFollowed = followed
             current.followerCount = max(0, current.followerCount + (followed && !previous ? 1 : !followed && previous ? -1 : 0))
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func toggleVerification() async {
+        do { current.isVerified = try await container.repository.toggleArtistVerification(artistName: current.artistName) }
+        catch { errorMessage = error.localizedDescription }
     }
 }

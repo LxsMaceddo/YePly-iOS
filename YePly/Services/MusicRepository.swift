@@ -7,6 +7,7 @@ struct TrackUpload: Sendable {
     let albumName: String?
     let duration: Double
     let fileSize: Int64
+    let waveformSamples: [Double]?
 }
 
 protocol MusicRepository: Sendable {
@@ -29,15 +30,21 @@ protocol MusicRepository: Sendable {
     func searchArtists(query: String) async throws -> [ArtistSummary]
     func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist]
     func toggleArtistFollow(artistName: String) async throws -> Bool
+    func toggleArtistVerification(artistName: String) async throws -> Bool
     func searchPlaylists(query: String) async throws -> [Playlist]
     func togglePlaylistFollow(playlistID: UUID) async throws -> Bool
     func recordPlaylistView(playlistID: UUID) async throws -> Int
     func toggleTrackLike(trackID: UUID) async throws -> Bool
     func fetchTrackComments(trackID: UUID) async throws -> [TrackComment]
-    func addTrackComment(trackID: UUID, userID: UUID, body: String) async throws
+    func addTrackComment(trackID: UUID, userID: UUID, body: String, timestampSeconds: Double?) async throws
     func deleteTrackComment(commentID: UUID) async throws
     func toggleCommentLike(commentID: UUID) async throws -> Bool
     func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary
+    func recordPlayback(trackID: UUID, positionSeconds: Double) async throws
+    func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem]
+    func clearPlaybackHistory() async throws
+    func fetchNotifications() async throws -> [SocialNotification]
+    func markAllNotificationsRead() async throws
 }
 
 actor DemoMusicRepository: MusicRepository {
@@ -47,6 +54,8 @@ actor DemoMusicRepository: MusicRepository {
     private var followedArtists: Set<String> = []
     private var likedTracks: Set<UUID> = []
     private var commentsByTrack: [UUID: [TrackComment]] = [:]
+    private var verifiedArtists: Set<String> = ["yeply sessions"]
+    private var history: [PlaybackHistoryItem] = []
     private let demoUserID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
 
     init() {
@@ -103,7 +112,7 @@ actor DemoMusicRepository: MusicRepository {
     }
 
     func uploadTrack(_ upload: TrackUpload, to playlist: Playlist, uploaderID: UUID, position: Int) async throws -> Track {
-        let track = Track(id: UUID(), playlistId: playlist.id, uploaderId: uploaderID, title: upload.title, artistName: upload.artistName, albumName: upload.albumName, durationSeconds: upload.duration, audioPath: upload.fileURL.lastPathComponent, artworkPath: nil, position: position, fileSizeBytes: upload.fileSize, createdAt: .now)
+        let track = Track(id: UUID(), playlistId: playlist.id, uploaderId: uploaderID, title: upload.title, artistName: upload.artistName, albumName: upload.albumName, durationSeconds: upload.duration, audioPath: upload.fileURL.lastPathComponent, artworkPath: nil, position: position, fileSizeBytes: upload.fileSize, createdAt: .now, waveformSamples: upload.waveformSamples)
         tracksByPlaylist[playlist.id, default: []].append(track)
         if let index = playlists.firstIndex(where: { $0.id == playlist.id }) { playlists[index].trackCount = tracksByPlaylist[playlist.id]?.count }
         return track
@@ -131,7 +140,7 @@ actor DemoMusicRepository: MusicRepository {
         let names = Set(playlists.map(\.artistName))
         return names.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }.sorted().map { name in
             let key = name.lowercased()
-            return ArtistSummary(artistKey: key, artistName: name, playlistCount: playlists.filter { $0.artistName == name }.count, trackCount: tracksByPlaylist.values.flatMap { $0 }.filter { $0.artistName == name }.count, followerCount: followedArtists.contains(key) ? 1 : 0, isFollowed: followedArtists.contains(key))
+            return ArtistSummary(artistKey: key, artistName: name, playlistCount: playlists.filter { $0.artistName == name }.count, trackCount: tracksByPlaylist.values.flatMap { $0 }.filter { $0.artistName == name }.count, followerCount: followedArtists.contains(key) ? 1 : 0, isFollowed: followedArtists.contains(key), isVerified: verifiedArtists.contains(key))
         }
     }
 
@@ -141,6 +150,12 @@ actor DemoMusicRepository: MusicRepository {
         let key = artistName.lowercased()
         if followedArtists.contains(key) { followedArtists.remove(key); return false }
         followedArtists.insert(key); return true
+    }
+
+    func toggleArtistVerification(artistName: String) async throws -> Bool {
+        let key = artistName.lowercased()
+        if verifiedArtists.contains(key) { verifiedArtists.remove(key); return false }
+        verifiedArtists.insert(key); return true
     }
 
     func searchPlaylists(query: String) async throws -> [Playlist] {
@@ -161,8 +176,8 @@ actor DemoMusicRepository: MusicRepository {
 
     func fetchTrackComments(trackID: UUID) async throws -> [TrackComment] { commentsByTrack[trackID] ?? [] }
 
-    func addTrackComment(trackID: UUID, userID: UUID, body: String) async throws {
-        let comment = TrackComment(id: UUID(), trackId: trackID, userId: userID, body: body, createdAt: .now, updatedAt: .now, displayName: "Vitor", username: "vitor", avatarPath: nil, likeCount: 0, isLiked: false)
+    func addTrackComment(trackID: UUID, userID: UUID, body: String, timestampSeconds: Double?) async throws {
+        let comment = TrackComment(id: UUID(), trackId: trackID, userId: userID, body: body, timestampSeconds: timestampSeconds, createdAt: .now, updatedAt: .now, displayName: "Vitor", username: "vitor", avatarPath: nil, likeCount: 0, isLiked: false)
         commentsByTrack[trackID, default: []].append(comment)
     }
 
@@ -175,4 +190,16 @@ actor DemoMusicRepository: MusicRepository {
     func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary {
         TrackSocialSummary(likeCount: likedTracks.contains(trackID) ? 1 : 0, commentCount: commentsByTrack[trackID]?.count ?? 0, isLiked: likedTracks.contains(trackID))
     }
+
+    func recordPlayback(trackID: UUID, positionSeconds: Double) async throws {
+        guard let track = tracksByPlaylist.values.flatMap({ $0 }).first(where: { $0.id == trackID }),
+              let playlist = playlists.first(where: { $0.id == track.playlistId }) else { return }
+        history.removeAll { $0.trackId == trackID }
+        history.insert(PlaybackHistoryItem(trackId: track.id, playlistId: track.playlistId, uploaderId: track.uploaderId, title: track.title, artistName: track.artistName, albumName: track.albumName, durationSeconds: track.durationSeconds, audioPath: track.audioPath, artworkPath: track.artworkPath, position: track.position, fileSizeBytes: track.fileSizeBytes, trackCreatedAt: track.createdAt, waveformSamples: track.waveformSamples, playlistTitle: playlist.title, playlistCoverPath: playlist.coverPath, lastPlayedAt: .now, playCount: 1), at: 0)
+    }
+
+    func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem] { history }
+    func clearPlaybackHistory() async throws { history.removeAll() }
+    func fetchNotifications() async throws -> [SocialNotification] { [] }
+    func markAllNotificationsRead() async throws { }
 }

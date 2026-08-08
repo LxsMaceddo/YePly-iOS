@@ -15,6 +15,11 @@ private struct TrackIDInput: Encodable { let pTrackId: UUID; enum CodingKeys: St
 private struct CommentIDInput: Encodable { let pCommentId: UUID; enum CodingKeys: String, CodingKey { case pCommentId = "p_comment_id" } }
 private struct ArtistNameInput: Encodable { let pArtistName: String; enum CodingKeys: String, CodingKey { case pArtistName = "p_artist_name" } }
 private struct ArtistKeyInput: Encodable { let pArtistKey: String; enum CodingKeys: String, CodingKey { case pArtistKey = "p_artist_key" } }
+private struct PlaybackInput: Encodable {
+    let pTrackId: UUID
+    let pPositionSeconds: Double
+    enum CodingKeys: String, CodingKey { case pTrackId = "p_track_id"; case pPositionSeconds = "p_position_seconds" }
+}
 private struct PlaylistUpdate: Encodable {
     let title: String
     let artistName: String
@@ -30,7 +35,7 @@ actor SupabaseMusicRepository: MusicRepository {
     init(client: SupabaseClient) { self.client = client }
 
     func fetchLibrary(scope: LibraryScope) async throws -> [Playlist] {
-        try await client.rpc("library_playlists", params: LibraryInput(pScope: scope.rawValue)).execute().value
+        try await client.rpc("library_playlists_social", params: LibraryInput(pScope: scope.rawValue)).execute().value
     }
 
     func fetchPlaylist(id: UUID) async throws -> Playlist {
@@ -38,7 +43,7 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func fetchTracks(playlistID: UUID) async throws -> [Track] {
-        try await client.rpc("playlist_tracks_with_social", params: PlaylistIDInput(pPlaylistId: playlistID)).execute().value
+        try await client.rpc("playlist_tracks_v2", params: PlaylistIDInput(pPlaylistId: playlistID)).execute().value
     }
 
     func acceptSharedPlaylist(token: UUID) async throws -> Playlist {
@@ -92,7 +97,7 @@ actor SupabaseMusicRepository: MusicRepository {
         )
 
         do {
-            let record = NewTrack(id: trackID, playlistId: playlist.id, uploaderId: uploaderID, title: upload.title, artistName: upload.artistName, albumName: upload.albumName, durationSeconds: upload.duration, audioPath: objectPath, artworkPath: nil, position: position, fileSizeBytes: upload.fileSize)
+            let record = NewTrack(id: trackID, playlistId: playlist.id, uploaderId: uploaderID, title: upload.title, artistName: upload.artistName, albumName: upload.albumName, durationSeconds: upload.duration, audioPath: objectPath, artworkPath: nil, position: position, fileSizeBytes: upload.fileSize, waveformSamples: upload.waveformSamples)
             return try await client.from("tracks").insert(record).select().single().execute().value
         } catch {
             try? await client.storage.from("audio").remove(paths: [objectPath])
@@ -122,7 +127,7 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func searchArtists(query: String) async throws -> [ArtistSummary] {
-        try await client.rpc("search_artists", params: SearchInput(pQuery: query, pLimit: 30)).execute().value
+        try await client.rpc("search_artists_v2", params: SearchInput(pQuery: query, pLimit: 30)).execute().value
     }
 
     func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist] {
@@ -131,6 +136,10 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func toggleArtistFollow(artistName: String) async throws -> Bool {
         try await client.rpc("toggle_artist_follow", params: ArtistNameInput(pArtistName: artistName)).execute().value
+    }
+
+    func toggleArtistVerification(artistName: String) async throws -> Bool {
+        try await client.rpc("toggle_artist_verification", params: ArtistNameInput(pArtistName: artistName)).execute().value
     }
 
     func searchPlaylists(query: String) async throws -> [Playlist] {
@@ -150,11 +159,11 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func fetchTrackComments(trackID: UUID) async throws -> [TrackComment] {
-        try await client.rpc("track_comments_with_social", params: TrackIDInput(pTrackId: trackID)).execute().value
+        try await client.rpc("track_comments_with_timestamps", params: TrackIDInput(pTrackId: trackID)).execute().value
     }
 
-    func addTrackComment(trackID: UUID, userID: UUID, body: String) async throws {
-        let comment = NewTrackComment(trackId: trackID, userId: userID, body: body)
+    func addTrackComment(trackID: UUID, userID: UUID, body: String, timestampSeconds: Double?) async throws {
+        let comment = NewTrackComment(trackId: trackID, userId: userID, body: body, timestampSeconds: timestampSeconds)
         try await client.from("track_comments").insert(comment).execute()
     }
 
@@ -168,6 +177,26 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary {
         try await client.rpc("track_social_summary", params: TrackIDInput(pTrackId: trackID)).single().execute().value
+    }
+
+    func recordPlayback(trackID: UUID, positionSeconds: Double) async throws {
+        try await client.rpc("record_playback", params: PlaybackInput(pTrackId: trackID, pPositionSeconds: positionSeconds)).execute()
+    }
+
+    func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem] {
+        try await client.rpc("playback_history_feed", params: ["p_limit": 150]).execute().value
+    }
+
+    func clearPlaybackHistory() async throws {
+        try await client.rpc("clear_playback_history").execute()
+    }
+
+    func fetchNotifications() async throws -> [SocialNotification] {
+        try await client.rpc("notifications_feed", params: ["p_limit": 60]).execute().value
+    }
+
+    func markAllNotificationsRead() async throws {
+        try await client.rpc("mark_all_notifications_read").execute()
     }
 
     private func signedURL(bucket: String, path: String) async throws -> URL {

@@ -20,13 +20,13 @@ private final class TrackCommentsViewModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    func send(trackID: UUID, userID: UUID, body: String, repository: any MusicRepository) async -> Bool {
+    func send(trackID: UUID, userID: UUID, body: String, timestampSeconds: Double?, repository: any MusicRepository) async -> Bool {
         let cleanBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanBody.isEmpty, cleanBody.count <= 1_000 else { return false }
         isSending = true
         defer { isSending = false }
         do {
-            try await repository.addTrackComment(trackID: trackID, userID: userID, body: cleanBody)
+            try await repository.addTrackComment(trackID: trackID, userID: userID, body: cleanBody, timestampSeconds: timestampSeconds)
             await load(trackID: trackID, repository: repository)
             return true
         } catch { errorMessage = error.localizedDescription; return false }
@@ -68,9 +68,16 @@ struct TrackCommentsView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
+    @EnvironmentObject private var player: AudioPlayer
     @StateObject private var model = TrackCommentsViewModel()
     @State private var draft = ""
+    @State private var selectedTimestamp: Double?
     let track: Track
+
+    init(track: Track, initialTimestamp: Double? = nil) {
+        self.track = track
+        _selectedTimestamp = State(initialValue: initialTimestamp.map { max(0, $0.rounded()) })
+    }
 
     var body: some View {
         NavigationStack {
@@ -134,7 +141,10 @@ struct TrackCommentsView: View {
                             comment: comment,
                             canDelete: comment.userId == session.userID || session.isAdmin,
                             onLike: { Task { await model.toggleCommentLike(comment, repository: container.repository) } },
-                            onDelete: { Task { await model.delete(comment, trackID: track.id, repository: container.repository) } }
+                            onDelete: { Task { await model.delete(comment, trackID: track.id, repository: container.repository) } },
+                            onSeek: comment.timestampSeconds != nil && player.currentTrack?.id == track.id ? {
+                                if let seconds = comment.timestampSeconds { player.seek(toSeconds: seconds) }
+                            } : nil
                         )
                         if comment.id != model.comments.last?.id { Divider().overlay(YePlyTheme.line).padding(.leading, 62) }
                     }
@@ -144,28 +154,46 @@ struct TrackCommentsView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Adicione um comentário", text: $draft, axis: .vertical)
-                .lineLimit(1...4)
-                .padding(.horizontal, 13).padding(.vertical, 10)
-                .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .onChange(of: draft) { _, value in if value.count > 1_000 { draft = String(value.prefix(1_000)) } }
-            Button {
-                Task {
-                    guard let userID = session.userID else { return }
-                    if await model.send(trackID: track.id, userID: userID, body: draft, repository: container.repository) { draft = "" }
+        VStack(alignment: .leading, spacing: 8) {
+            if let selectedTimestamp {
+                Button { self.selectedTimestamp = nil } label: {
+                    Label("Comentando em \(formatTime(selectedTimestamp))", systemImage: "clock.badge.checkmark")
+                        .font(.caption.weight(.semibold)).foregroundStyle(YePlyTheme.accent)
+                        .padding(.horizontal, 11).frame(height: 30)
+                        .background(YePlyTheme.accent.opacity(0.12), in: Capsule())
                 }
-            } label: {
-                ZStack {
-                    Circle().fill(.white)
-                    if model.isSending { ProgressView().tint(.black) }
-                    else { Image(systemName: "arrow.up").fontWeight(.bold).foregroundStyle(.black) }
-                }
-                .frame(width: 42, height: 42)
+                .buttonStyle(.plain)
             }
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSending)
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Adicione um comentário", text: $draft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 13).padding(.vertical, 10)
+                    .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .onChange(of: draft) { _, value in if value.count > 1_000 { draft = String(value.prefix(1_000)) } }
+                Button {
+                    Task {
+                        guard let userID = session.userID else { return }
+                        if await model.send(trackID: track.id, userID: userID, body: draft, timestampSeconds: selectedTimestamp, repository: container.repository) {
+                            draft = ""; selectedTimestamp = nil
+                        }
+                    }
+                } label: {
+                    ZStack {
+                        Circle().fill(.white)
+                        if model.isSending { ProgressView().tint(.black) }
+                        else { Image(systemName: "arrow.up").fontWeight(.bold).foregroundStyle(.black) }
+                    }
+                    .frame(width: 42, height: 42)
+                }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSending)
+            }
         }
         .padding(12)
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let value = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }
 
@@ -175,6 +203,7 @@ private struct CommentRow: View {
     let canDelete: Bool
     let onLike: () -> Void
     let onDelete: () -> Void
+    let onSeek: (() -> Void)?
     @State private var avatarURL: URL?
 
     var body: some View {
@@ -187,11 +216,20 @@ private struct CommentRow: View {
                     Text("· \(relativeDate)").font(.caption2).foregroundStyle(YePlyTheme.tertiary)
                 }
                 Text(comment.body).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: onLike) {
-                    Label("\(comment.likeCount)", systemImage: comment.isLiked ? "heart.fill" : "heart")
-                        .font(.caption2.weight(.semibold)).foregroundStyle(comment.isLiked ? Color.red : YePlyTheme.secondary)
+                HStack(spacing: 14) {
+                    if let timestamp = comment.timestampSeconds {
+                        Button(action: { onSeek?() }) {
+                            Label(formatTime(timestamp), systemImage: "play.circle.fill")
+                                .font(.caption2.weight(.bold)).foregroundStyle(YePlyTheme.accent)
+                        }
+                        .buttonStyle(.plain).disabled(onSeek == nil)
+                    }
+                    Button(action: onLike) {
+                        Label("\(comment.likeCount)", systemImage: comment.isLiked ? "heart.fill" : "heart")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(comment.isLiked ? Color.red : YePlyTheme.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             if canDelete {
                 Menu {
@@ -226,5 +264,10 @@ private struct CommentRow: View {
 
     private var relativeDate: String {
         RelativeDateTimeFormatter().localizedString(for: comment.createdAt, relativeTo: .now)
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let value = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }

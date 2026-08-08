@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAM_ID.com.yeply.app"],
+        "components": [
+          { "/": "/p/*", "comment": "Abre playlists compartilhadas no YePly" }
+        ]
+      }
+    ]
+  }
+}

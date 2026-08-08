@@ -11,6 +11,7 @@ final class LibraryViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do { playlists = try await repository.fetchLibrary(scope: scope); errorMessage = nil }
+        catch let error where error.isYePlyCancellation { return }
         catch { errorMessage = error.localizedDescription }
     }
 

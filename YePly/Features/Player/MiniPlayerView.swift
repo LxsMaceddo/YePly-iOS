@@ -61,6 +61,8 @@ struct NowPlayingView: View {
     @State private var showingQueue = false
     @State private var scrubValue: Double = 0
     @State private var isScrubbing = false
+    @State private var commentMoment: PlayerCommentMoment?
+    @State private var isCurrentArtistVerified = false
 
     var body: some View {
         ZStack {
@@ -89,8 +91,10 @@ struct NowPlayingView: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(track.title)
                                         .font(.title2.bold()).lineLimit(2)
-                                    Text(track.artistName)
-                                        .font(.subheadline).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+                                    HStack(spacing: 5) {
+                                        Text(track.artistName).font(.subheadline).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+                                        if isCurrentArtistVerified { VerifiedArtistBadge() }
+                                    }
                                 }
                                 Spacer()
                                 Image(systemName: "waveform.circle.fill")
@@ -98,21 +102,29 @@ struct NowPlayingView: View {
                             }
 
                             VStack(spacing: 7) {
-                                Slider(
-                                    value: $scrubValue,
-                                    in: 0...1,
-                                    onEditingChanged: { editing in
-                                        isScrubbing = editing
-                                        if !editing { player.seek(to: scrubValue) }
-                                    }
-                                )
-                                .tint(.white)
+                                WaveformScrubber(samples: player.currentWaveform, progress: isScrubbing ? scrubValue : player.progress) { value, editing in
+                                    scrubValue = value
+                                    isScrubbing = editing
+                                    if !editing { player.seek(to: value) }
+                                }
                                 HStack {
                                     Text(formatTime(isScrubbing ? scrubValue * player.duration : player.elapsedTime))
                                     Spacer()
                                     Text("-\(formatTime(max(0, player.duration - (isScrubbing ? scrubValue * player.duration : player.elapsedTime))))")
                                 }
                                 .font(.caption2.monospacedDigit()).foregroundStyle(YePlyTheme.tertiary)
+                            }
+
+                            if !player.isPlaying {
+                                Button {
+                                    commentMoment = PlayerCommentMoment(track: track, seconds: player.elapsedTime)
+                                } label: {
+                                    Label("Comentar em \(formatTime(player.elapsedTime))", systemImage: "bubble.left.and.text.bubble.right")
+                                        .font(.subheadline.weight(.bold)).frame(maxWidth: .infinity).frame(height: 46)
+                                        .background(YePlyTheme.elevatedStrong, in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .transition(.scale.combined(with: .opacity))
                             }
 
                             HStack(spacing: 0) {
@@ -166,7 +178,13 @@ struct NowPlayingView: View {
                 }
                 .scrollIndicators(.hidden)
                 .onChange(of: player.progress) { _, value in if !isScrubbing { scrubValue = value } }
+                .task(id: track.artistName) {
+                    guard offlineLibrary.isConnected else { return }
+                    let artists = try? await container.repository.searchArtists(query: track.artistName)
+                    isCurrentArtistVerified = artists?.first(where: { $0.artistName.localizedCaseInsensitiveCompare(track.artistName) == .orderedSame })?.isVerified ?? false
+                }
                 .sheet(isPresented: $showingQueue) { PlaybackQueueView() }
+                .sheet(item: $commentMoment) { moment in TrackCommentsView(track: moment.track, initialTimestamp: moment.seconds) }
                 .sheet(item: $downloadManager.exportedFile) { file in ActivityShareSheet(items: [file.url]) }
                 .alert("Não foi possível salvar", isPresented: Binding(
                     get: { downloadManager.errorMessage != nil },
@@ -194,6 +212,9 @@ struct NowPlayingView: View {
                     Task { await downloadManager.prepare(track: track, repository: container.repository, localURL: offlineLibrary.localAudioURL(for: track)) }
                 }
                 Button("Ver fila de reprodução", systemImage: "list.bullet") { showingQueue = true }
+                Button("Comentar neste momento", systemImage: "bubble.left") {
+                    commentMoment = PlayerCommentMoment(track: track, seconds: player.elapsedTime)
+                }
             } label: {
                 Image(systemName: "ellipsis").font(.headline)
                     .frame(width: 42, height: 42).background(.black.opacity(0.18), in: Circle())
@@ -214,6 +235,12 @@ struct NowPlayingView: View {
         let value = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", value / 60, value % 60)
     }
+}
+
+private struct PlayerCommentMoment: Identifiable {
+    let id = UUID()
+    let track: Track
+    let seconds: Double
 }
 
 private struct PlaybackQueueView: View {

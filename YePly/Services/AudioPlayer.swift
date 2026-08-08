@@ -14,6 +14,18 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var currentArtworkPath: String?
     @Published private(set) var currentCollectionTitle: String?
     @Published private(set) var isRepeatingOne = false
+    @Published private(set) var currentWaveform: [Double] = []
+    @Published var gaplessPlaybackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(gaplessPlaybackEnabled, forKey: "yeply.playback.gapless")
+            player?.automaticallyWaitsToMinimizeStalling = !gaplessPlaybackEnabled
+            if gaplessPlaybackEnabled { Task { await preloadNextTrack() } }
+            else { preloadedNext = nil }
+        }
+    }
+    @Published var fadeDuration: Double {
+        didSet { UserDefaults.standard.set(fadeDuration, forKey: "yeply.playback.fadeDuration") }
+    }
     @Published var errorMessage: String?
 
     private struct PlaybackContext {
@@ -29,9 +41,16 @@ final class AudioPlayer: ObservableObject {
     private var contexts: [UUID: PlaybackContext] = [:]
     private var artworkTask: Task<Void, Never>?
     private var nowPlayingArtwork: MPMediaItemArtwork?
+    private var preloadedNext: (trackID: UUID, url: URL)?
+    private var fadeTask: Task<Void, Never>?
+    private var waveformTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
 
     init(offlineLibrary: OfflineLibraryStore) {
         self.offlineLibrary = offlineLibrary
+        let defaults = UserDefaults.standard
+        self.gaplessPlaybackEnabled = defaults.object(forKey: "yeply.playback.gapless") == nil ? true : defaults.bool(forKey: "yeply.playback.gapless")
+        self.fadeDuration = defaults.object(forKey: "yeply.playback.fadeDuration") == nil ? 0 : defaults.double(forKey: "yeply.playback.fadeDuration")
         configureAudioSession()
         configureRemoteCommands()
     }
@@ -40,6 +59,9 @@ final class AudioPlayer: ObservableObject {
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         artworkTask?.cancel()
+        fadeTask?.cancel()
+        waveformTask?.cancel()
+        historyTask?.cancel()
     }
 
     var currentIndex: Int? {
@@ -142,6 +164,11 @@ final class AudioPlayer: ObservableObject {
         updateNowPlaying(elapsed: target)
     }
 
+    func seek(toSeconds seconds: Double) {
+        guard duration > 0 else { return }
+        seek(to: min(max(seconds / duration, 0), 1))
+    }
+
     func next() { Task { await move(by: 1) } }
 
     func previous() {
@@ -158,7 +185,10 @@ final class AudioPlayer: ObservableObject {
         errorMessage = nil
         do {
             let url: URL
-            if let localURL = offlineLibrary.localAudioURL(for: track) {
+            if let preloadedNext, preloadedNext.trackID == track.id {
+                url = preloadedNext.url
+                self.preloadedNext = nil
+            } else if let localURL = offlineLibrary.localAudioURL(for: track) {
                 url = localURL
             } else {
                 guard offlineLibrary.isConnected else {
@@ -166,14 +196,31 @@ final class AudioPlayer: ObservableObject {
                 }
                 url = try await repository.signedAudioURL(for: track)
             }
+            if currentTrack?.id != track.id, isPlaying, fadeDuration > 0, (self.player?.volume ?? 0) > 0.05 {
+                await fadeVolume(to: 0, duration: min(fadeDuration, 1.5))
+            }
             let context = contexts[track.id]
             currentArtworkPath = context?.artworkPath ?? track.artworkPath
             currentCollectionTitle = context?.collectionTitle ?? track.albumName
             replaceItem(url: url, track: track)
+            player?.volume = fadeDuration > 0 ? 0 : 1
             player?.play()
             isPlaying = true
+            if fadeDuration > 0 {
+                fadeTask?.cancel()
+                fadeTask = Task { [weak self] in
+                    guard let self else { return }
+                    await self.fadeVolume(to: 1, duration: self.fadeDuration)
+                }
+            }
             updateNowPlaying()
             loadNowPlayingArtwork()
+            loadWaveform(for: track, url: url)
+            if offlineLibrary.isConnected {
+                historyTask?.cancel()
+                historyTask = Task { try? await repository.recordPlayback(trackID: track.id, positionSeconds: 0) }
+            }
+            if gaplessPlaybackEnabled { Task { await preloadNextTrack() } }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -191,8 +238,11 @@ final class AudioPlayer: ObservableObject {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver); self.endObserver = nil }
 
         let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = gaplessPlaybackEnabled ? 8 : 0
         player = AVPlayer(playerItem: item)
+        player?.automaticallyWaitsToMinimizeStalling = !gaplessPlaybackEnabled
         currentTrack = track
+        currentWaveform = track.waveformSamples?.isEmpty == false ? track.waveformSamples! : fallbackWaveform(for: track.id)
         duration = track.durationSeconds
         elapsedTime = 0
         progress = 0
@@ -209,6 +259,12 @@ final class AudioPlayer: ObservableObject {
                 if itemDuration.isFinite, itemDuration > 0 { self.duration = itemDuration }
                 self.elapsedTime = seconds
                 self.progress = self.duration > 0 ? min(seconds / self.duration, 1) : 0
+                if self.fadeDuration > 0, self.hasNext, self.isPlaying {
+                    let remaining = max(0, self.duration - seconds)
+                    if remaining <= self.fadeDuration {
+                        self.player?.volume = Float(min(max(remaining / self.fadeDuration, 0), 1))
+                    }
+                }
                 self.updateNowPlaying(elapsed: seconds)
             }
         }
@@ -231,6 +287,52 @@ final class AudioPlayer: ObservableObject {
                     self.updateNowPlaying(elapsed: self.duration)
                 }
             }
+        }
+    }
+
+    private func preloadNextTrack() async {
+        guard gaplessPlaybackEnabled, let currentIndex, queue.indices.contains(currentIndex + 1), let repository else {
+            preloadedNext = nil
+            return
+        }
+        let nextTrack = queue[currentIndex + 1]
+        do {
+            let url: URL
+            if let localURL = offlineLibrary.localAudioURL(for: nextTrack) { url = localURL }
+            else { url = try await repository.signedAudioURL(for: nextTrack) }
+            guard currentTrack != nil, queue.indices.contains(currentIndex + 1), queue[currentIndex + 1].id == nextTrack.id else { return }
+            preloadedNext = (nextTrack.id, url)
+        } catch { preloadedNext = nil }
+    }
+
+    private func fadeVolume(to target: Float, duration: Double) async {
+        guard duration > 0, let player else { player?.volume = target; return }
+        let start = player.volume
+        let steps = max(4, Int(duration * 20))
+        for step in 1...steps {
+            guard !Task.isCancelled else { return }
+            player.volume = start + (target - start) * Float(step) / Float(steps)
+            try? await Task.sleep(for: .milliseconds(Int((duration * 1_000) / Double(steps))))
+        }
+        player.volume = target
+    }
+
+    private func loadWaveform(for track: Track, url: URL) {
+        waveformTask?.cancel()
+        guard track.waveformSamples?.isEmpty != false, url.isFileURL else { return }
+        waveformTask = Task { [weak self] in
+            guard let samples = await WaveformAnalyzer.samples(from: url), !Task.isCancelled else { return }
+            self?.currentWaveform = samples
+        }
+    }
+
+    private func fallbackWaveform(for id: UUID) -> [Double] {
+        var state = UInt64(bitPattern: Int64(id.uuidString.hashValue))
+        return (0..<96).map { index in
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let random = Double((state >> 33) % 1_000) / 1_000
+            let shape = 0.45 + 0.35 * sin(Double(index) * 0.22)
+            return min(1, max(0.1, shape + random * 0.35))
         }
     }
 

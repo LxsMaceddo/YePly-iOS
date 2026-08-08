@@ -29,6 +29,19 @@ struct AdminDashboardView: View {
                         .foregroundStyle(.black).padding(.horizontal, 18).frame(height: 52).background(.white, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                 }
 
+                NavigationLink { ArtistVerificationAdminView() } label: {
+                    HStack {
+                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Artistas verificados").fontWeight(.bold).foregroundStyle(.white)
+                            Text("Conceda ou remova o selo oficial").font(.caption).foregroundStyle(YePlyTheme.secondary)
+                        }
+                        Spacer(); Image(systemName: "chevron.right").foregroundStyle(YePlyTheme.tertiary)
+                    }
+                    .padding(16).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 15))
+                }
+                .buttonStyle(.plain)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text("SUAS PLAYLISTS").font(.caption2.weight(.bold)).tracking(2).foregroundStyle(YePlyTheme.tertiary)
                     ForEach(model.playlists) { playlist in

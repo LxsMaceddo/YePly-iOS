@@ -1,5 +1,7 @@
 -- YePly iOS 1.3: social graph, discovery, track reactions and playlist views.
 
+begin;
+
 create table if not exists public.user_follows (
   follower_id uuid not null references public.profiles(id) on delete cascade,
   followed_user_id uuid not null references public.profiles(id) on delete cascade,
@@ -223,8 +225,7 @@ begin
   return v_total;
 end; $$;
 
-drop function if exists public.library_playlists(text);
-create function public.library_playlists(p_scope text default 'all')
+create or replace function public.library_playlists_social(p_scope text default 'all')
 returns table (
   id uuid, owner_id uuid, title text, artist_name text, summary text, cover_path text,
   visibility public.playlist_visibility, share_token uuid, is_featured boolean,
@@ -291,7 +292,7 @@ language sql stable security invoker set search_path = '' as $$
          exists(select 1 from public.user_follows f where f.follower_id = auth.uid() and f.followed_user_id = p.id)
   from public.profiles p
   where p.id <> auth.uid() and (btrim(p_query) = '' or p.display_name ilike '%' || btrim(p_query) || '%' or p.username ilike '%' || btrim(p_query) || '%')
-  order by follower_count desc, p.display_name
+  order by 9 desc, p.display_name
   limit least(greatest(p_limit, 1), 50)
 $$;
 
@@ -324,7 +325,7 @@ language sql stable security invoker set search_path = '' as $$
          exists(select 1 from public.playlist_follows f where f.playlist_id = p.id and f.user_id = auth.uid())
   from public.playlists p
   where btrim(p_query) = '' or p.title ilike '%' || btrim(p_query) || '%' or p.artist_name ilike '%' || btrim(p_query) || '%'
-  order by follower_count desc, view_count desc, p.updated_at desc
+  order by 14 desc, 13 desc, p.updated_at desc
   limit least(greatest(p_limit, 1), 60)
 $$;
 
@@ -346,7 +347,7 @@ language sql stable security invoker set search_path = '' as $$
          exists(select 1 from public.artist_follows f where f.artist_key = n.key and f.user_id = auth.uid())
   from normalized n
   where btrim(p_query) = '' or n.display_name ilike '%' || btrim(p_query) || '%'
-  order by follower_count desc, n.display_name
+  order by 5 desc, n.display_name
   limit least(greatest(p_limit, 1), 50)
 $$;
 
@@ -400,7 +401,7 @@ revoke all on function public.toggle_artist_follow(text) from public;
 revoke all on function public.toggle_track_like(uuid) from public;
 revoke all on function public.toggle_comment_like(uuid) from public;
 revoke all on function public.record_playlist_view(uuid) from public;
-revoke all on function public.library_playlists(text) from public;
+revoke all on function public.library_playlists_social(text) from public;
 revoke all on function public.playlist_with_social(uuid) from public;
 revoke all on function public.playlist_tracks_with_social(uuid) from public;
 revoke all on function public.search_profiles(text, integer) from public;
@@ -413,10 +414,12 @@ revoke all on function public.track_social_summary(uuid) from public;
 
 grant execute on function public.toggle_user_follow(uuid), public.toggle_playlist_follow(uuid), public.toggle_artist_follow(text),
   public.toggle_track_like(uuid), public.toggle_comment_like(uuid), public.record_playlist_view(uuid),
-  public.library_playlists(text), public.playlist_with_social(uuid), public.playlist_tracks_with_social(uuid),
+  public.library_playlists_social(text), public.playlist_with_social(uuid), public.playlist_tracks_with_social(uuid),
   public.search_profiles(text, integer), public.profile_with_social(uuid), public.search_playlists(text, integer),
   public.search_artists(text, integer), public.artist_playlists(text), public.track_comments_with_social(uuid),
   public.track_social_summary(uuid) to authenticated;
 
 comment on table public.playlist_views is 'One row per viewer and playlist; view_count stores repeat opens while unique views use row count.';
 comment on table public.track_comments is 'User comments attached to tracks and protected by playlist access policies.';
+
+commit;

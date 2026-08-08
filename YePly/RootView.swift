@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
+    @EnvironmentObject private var notifications: YePlyNotificationStore
 
     var body: some View {
         Group {
@@ -25,6 +26,7 @@ struct MainTabView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var links: DeepLinkRouter
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
+    @EnvironmentObject private var notifications: YePlyNotificationStore
     @State private var selection = 0
     @State private var showingNowPlaying = false
     @State private var isMiniPlayerHidden = false
@@ -66,10 +68,17 @@ struct MainTabView: View {
             }
         }
         .overlay(alignment: .bottom) { playerOverlay }
+        .overlay(alignment: .top) {
+            if let notification = notifications.toast {
+                NotificationToast(notification: notification, onOpen: notifications.openCenter, onDismiss: notifications.dismissToast)
+                    .padding(.horizontal, 12).safeAreaPadding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .onChange(of: player.currentTrack?.id) { oldTrackID, newTrackID in
             if oldTrackID != newTrackID { withAnimation(.snappy) { isMiniPlayerHidden = false } }
         }
         .fullScreenCover(isPresented: $showingNowPlaying) { NowPlayingView() }
+        .sheet(isPresented: $notifications.showingCenter) { NotificationCenterView() }
         .sheet(isPresented: Binding(get: { links.pendingShareToken != nil }, set: { if !$0 { links.clearShare() } })) {
             if let token = links.pendingShareToken { SharedPlaylistImportView(token: token) }
         }
@@ -77,7 +86,15 @@ struct MainTabView: View {
             Button("OK", role: .cancel) {}
         } message: { Text(player.errorMessage ?? "") }
         .yeplyBackground()
+        .task(id: notificationMonitorKey) {
+            guard session.userID != nil, offlineLibrary.isConnected else { return }
+            await notifications.monitor(repository: containerRepository)
+        }
     }
+
+    @EnvironmentObject private var container: AppContainer
+    private var containerRepository: any MusicRepository { container.repository }
+    private var notificationMonitorKey: String { "\(session.userID?.uuidString ?? "none")-\(offlineLibrary.isConnected)" }
 
     @ViewBuilder
     private var playerOverlay: some View {

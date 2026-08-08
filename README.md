@@ -27,6 +27,12 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 - Curtidas e comentários em cada música, incluindo curtidas nos comentários
 - Visualizações únicas nas playlists e indicadores de curtidas nas faixas
 - Tratamento automático da orientação da foto de perfil antes do upload
+- Histórico de reprodução privado e sincronizado por usuário
+- Player com forma de onda navegável gerada a partir da intensidade real dos novos MP3
+- Comentários associados a momentos específicos da música, com retorno direto ao minuto
+- Reprodução sem atraso com pré-carregamento da próxima faixa e fade configurável
+- Selo azul de artista verificado administrado somente por contas admin
+- Central de notificações e pop-ups para seguidores, curtidas e comentários
 - Nome de usuário permanente protegido também por trigger no PostgreSQL
 - Reprodução em segundo plano
 - Links `https://yeply.app/p/<token>` e fallback `yeply://playlist/<token>`
@@ -45,7 +51,7 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 ## Configuração rápida
 
 1. Crie um projeto no Supabase.
-2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute `202608080003_offline_social_profiles.sql` e depois `202608080004_social_graph.sql`.
+2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute `202608080003_offline_social_profiles.sql`, `202608080004_social_graph.sql` e por último `202608080005_player_history_notifications.sql`.
 3. Crie sua conta pelo aplicativo e depois execute `supabase/promote-admin.sql`, substituindo o e-mail.
 4. Em `YePly/Support/AppConfig.plist`, informe a URL e a **publishable key** do projeto. Nunca coloque a `service_role` no aplicativo.
 5. No Supabase Auth, mantenha a confirmação de e-mail ativada e adicione `yeply://auth/callback` aos Redirect URLs.

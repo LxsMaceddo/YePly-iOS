@@ -6,6 +6,7 @@ struct ProfileView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
+    @EnvironmentObject private var notifications: YePlyNotificationStore
     @State private var showingSignOut = false
     @State private var showingEditor = false
     @State private var avatarURL: URL?
@@ -17,6 +18,16 @@ struct ProfileView: View {
                 HStack {
                     Text("Perfil").font(.system(size: 34, weight: .bold, design: .rounded))
                     Spacer()
+                    Button { notifications.openCenter() } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bell.fill").frame(width: 38, height: 38).background(YePlyTheme.elevated, in: Circle())
+                            if notifications.unreadCount > 0 {
+                                Text("\(min(notifications.unreadCount, 99))").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                                    .padding(4).background(.red, in: Circle()).offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                     YePlyLogo(size: 34)
                 }
                 .padding(.top, 18)
@@ -69,6 +80,16 @@ struct ProfileView: View {
                 }
 
                 VStack(spacing: 0) {
+                    NavigationLink { PlaybackHistoryView() } label: {
+                        ProfileRow(icon: "clock.arrow.circlepath", title: "Histórico de reprodução", subtitle: "Veja tudo que você ouviu")
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                    NavigationLink { PlaybackSettingsView() } label: {
+                        ProfileRow(icon: "slider.horizontal.3", title: "Configurações de reprodução", subtitle: "Sem atraso, fade in e fade out")
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
                     ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Arquivos offline protegidos neste iPhone")
                     Divider().overlay(YePlyTheme.line).padding(.leading, 56)
                     ProfileRow(icon: "questionmark.circle", title: "Ajuda e suporte", subtitle: "Fale com a equipe YePly")
@@ -281,18 +302,15 @@ private struct ProfileRow: View {
     let title: String
     let subtitle: String
     var body: some View {
-        Button {} label: {
-            HStack(spacing: 13) {
-                Image(systemName: icon).frame(width: 30, height: 30).foregroundStyle(YePlyTheme.secondary)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                    Text(subtitle).font(.caption).foregroundStyle(YePlyTheme.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(YePlyTheme.tertiary)
+        HStack(spacing: 13) {
+            Image(systemName: icon).frame(width: 30, height: 30).foregroundStyle(YePlyTheme.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                Text(subtitle).font(.caption).foregroundStyle(YePlyTheme.secondary)
             }
-            .padding(14)
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(YePlyTheme.tertiary)
         }
-        .buttonStyle(.plain)
+        .padding(14)
     }
 }
