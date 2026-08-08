@@ -6,11 +6,14 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 
 - Entrada, criação de conta e confirmação de e-mail
 - Biblioteca minimalista com Tudo, Minhas e Compartilhadas
+- Grade estável com duas playlists por linha e ordenação por data, nome ou artista
 - Pesquisa e grade de capas adaptada ao iPhone
 - Criação de playlists públicas, não listadas ou privadas
 - Upload de MP3 pelo app Arquivos, limitado a 200 MB
 - Upload de capa pela fototeca
 - Player com fila, avançar/voltar e controles na tela bloqueada
+- Player completo com capa, progresso, repetição e lista de próximas músicas
+- Menu de faixa para tocar agora, tocar a seguir, adicionar à fila, ver informações e salvar o MP3
 - Reprodução em segundo plano
 - Links `https://yeply.app/p/<token>` e fallback `yeply://playlist/<token>`
 - Área administrativa por função protegida no JWT

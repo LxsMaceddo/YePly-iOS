@@ -21,6 +21,12 @@ struct LibraryView: View {
     @State private var scope: LibraryScope
     @State private var searchText = ""
     @State private var showingCreate = false
+    @State private var sortMode: SortMode = .recent
+
+    private let columns = [
+        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top),
+        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top)
+    ]
 
     init(initialScope: LibraryScope) { _scope = State(initialValue: initialScope) }
 
@@ -40,12 +46,16 @@ struct LibraryView: View {
                     )
                     .padding(.top, 60)
                 } else {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible())], spacing: 22) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
                         ForEach(filtered) { playlist in
-                            NavigationLink(value: playlist) { PlaylistCard(playlist: playlist) }
+                            NavigationLink(value: playlist) {
+                                PlaylistCard(playlist: playlist)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                                 .buttonStyle(.plain)
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
             .padding(.horizontal, 18)
@@ -95,17 +105,31 @@ struct LibraryView: View {
             }
             Spacer()
             Menu {
-                Button("Mais recentes") {}
-                Button("Nome") {}
+                Picker("Ordenar", selection: $sortMode) {
+                    ForEach(SortMode.allCases) { mode in Label(mode.title, systemImage: mode.icon).tag(mode) }
+                }
             } label: { Image(systemName: "arrow.up.arrow.down").foregroundStyle(YePlyTheme.secondary).frame(width: 36, height: 36).background(YePlyTheme.elevated, in: Circle()) }
         }
     }
 
     private var filtered: [Playlist] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.playlists }
-        return model.playlists.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.artistName.localizedCaseInsensitiveContains(query) }
+        let matching = query.isEmpty ? model.playlists : model.playlists.filter {
+            $0.title.localizedCaseInsensitiveContains(query) || $0.artistName.localizedCaseInsensitiveContains(query)
+        }
+        switch sortMode {
+        case .recent: return matching.sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+        case .name: return matching.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        case .artist: return matching.sorted { $0.artistName.localizedStandardCompare($1.artistName) == .orderedAscending }
+        }
     }
+}
+
+private enum SortMode: String, CaseIterable, Identifiable {
+    case recent, name, artist
+    var id: String { rawValue }
+    var title: String { switch self { case .recent: "Mais recentes"; case .name: "Nome"; case .artist: "Artista" } }
+    var icon: String { switch self { case .recent: "clock"; case .name: "textformat"; case .artist: "person" } }
 }
 
 struct PlaylistCard: View {
@@ -115,15 +139,19 @@ struct PlaylistCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             PlaylistArtworkView(playlist: playlist)
+                .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: 3) {
                 Text(playlist.title).font(.subheadline.weight(.bold)).foregroundStyle(.white).lineLimit(1)
-                HStack(spacing: 5) {
-                    Text(playlist.artistName).lineLimit(1)
-                    if let count = playlist.trackCount { Text("• \(count) faixa\(count == 1 ? "" : "s")") }
-                }
-                .font(.caption).foregroundStyle(YePlyTheme.secondary)
+                Text(metadata).font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var metadata: String {
+        guard let count = playlist.trackCount else { return playlist.artistName }
+        return "\(playlist.artistName) • \(count) faixa\(count == 1 ? "" : "s")"
     }
 }
 

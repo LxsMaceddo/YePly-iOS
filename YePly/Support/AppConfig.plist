@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>SUPABASE_URL</key><string>https://dthshmrvjghkdfovzyib.supabase.co</string>
-  <key>SUPABASE_PUBLISHABLE_KEY</key><string>sb_publishable_EjUVc8v3AeMpbDGujC79Wg_PBnGa6Uj</string>
+  <key>SUPABASE_URL</key><string>https://YOUR_PROJECT.supabase.co</string>
+  <key>SUPABASE_PUBLISHABLE_KEY</key><string>YOUR_PUBLISHABLE_KEY</string>
   <key>UNIVERSAL_LINK_BASE</key><string>https://yeply.app/p/</string>
 </dict>
 </plist>

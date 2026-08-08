@@ -23,6 +23,7 @@ struct MainTabView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var links: DeepLinkRouter
     @State private var selection = 0
+    @State private var showingNowPlaying = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -43,8 +44,12 @@ struct MainTabView: View {
         }
         .tint(.white)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if player.currentTrack != nil { MiniPlayerView().padding(.horizontal, 10).padding(.bottom, 2) }
+            if player.currentTrack != nil {
+                MiniPlayerView { showingNowPlaying = true }
+                    .padding(.horizontal, 10).padding(.bottom, 2)
+            }
         }
+        .fullScreenCover(isPresented: $showingNowPlaying) { NowPlayingView() }
         .sheet(isPresented: Binding(get: { links.pendingShareToken != nil }, set: { if !$0 { links.clearShare() } })) {
             if let token = links.pendingShareToken { SharedPlaylistImportView(token: token) }
         }

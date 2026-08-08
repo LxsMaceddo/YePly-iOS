@@ -2,7 +2,7 @@
 do $$
 declare target_id uuid;
 begin
-  select id into target_id from auth.users where lower(email) = lower('SEU_EMAIL@EXEMPLO.COM') limit 1;
+  select id into target_id from auth.users where lower(email) = lower('vitorhugoof2506@gmail.com') limit 1;
   if target_id is null then raise exception 'User not found'; end if;
   update auth.users
   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
