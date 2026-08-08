@@ -42,6 +42,7 @@ protocol MusicRepository: Sendable {
     func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary
     func recordPlayback(trackID: UUID, positionSeconds: Double) async throws
     func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem]
+    func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem]
     func clearPlaybackHistory() async throws
     func fetchNotifications() async throws -> [SocialNotification]
     func markAllNotificationsRead() async throws
@@ -137,14 +138,35 @@ actor DemoMusicRepository: MusicRepository {
     func toggleUserFollow(userID: UUID) async throws -> Bool { false }
 
     func searchArtists(query: String) async throws -> [ArtistSummary] {
-        let names = Set(playlists.map(\.artistName))
+        let allTracks = tracksByPlaylist.values.flatMap { $0 }
+        let names = Set(
+            playlists.flatMap { ArtistCreditParser.names(from: $0.artistName) }
+                + allTracks.flatMap { ArtistCreditParser.names(from: $0.artistName) }
+        )
         return names.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }.sorted().map { name in
-            let key = name.lowercased()
-            return ArtistSummary(artistKey: key, artistName: name, playlistCount: playlists.filter { $0.artistName == name }.count, trackCount: tracksByPlaylist.values.flatMap { $0 }.filter { $0.artistName == name }.count, followerCount: followedArtists.contains(key) ? 1 : 0, isFollowed: followedArtists.contains(key), isVerified: verifiedArtists.contains(key))
+            let key = ArtistCreditParser.key(for: name)
+            let artistTracks = allTracks.filter {
+                ArtistCreditParser.names(from: $0.artistName).contains { ArtistCreditParser.key(for: $0) == key }
+            }
+            let playlistIDs = Set(
+                playlists.filter { playlist in
+                    ArtistCreditParser.names(from: playlist.artistName).contains { ArtistCreditParser.key(for: $0) == key }
+                        || artistTracks.contains { track in track.playlistId == playlist.id }
+                }.map(\.id)
+            )
+            return ArtistSummary(artistKey: key, artistName: name, playlistCount: playlistIDs.count, trackCount: artistTracks.count, followerCount: followedArtists.contains(key) ? 1 : 0, isFollowed: followedArtists.contains(key), isVerified: verifiedArtists.contains(key))
         }
     }
 
-    func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist] { playlists.filter { $0.artistName.lowercased() == artistKey } }
+    func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist] {
+        let matchingPlaylistIDs = Set(tracksByPlaylist.values.flatMap { $0 }.filter {
+            ArtistCreditParser.names(from: $0.artistName).contains { ArtistCreditParser.key(for: $0) == artistKey }
+        }.map(\.playlistId))
+        return playlists.filter {
+            matchingPlaylistIDs.contains($0.id)
+                || ArtistCreditParser.names(from: $0.artistName).contains { ArtistCreditParser.key(for: $0) == artistKey }
+        }
+    }
 
     func toggleArtistFollow(artistName: String) async throws -> Bool {
         let key = artistName.lowercased()
@@ -194,11 +216,34 @@ actor DemoMusicRepository: MusicRepository {
     func recordPlayback(trackID: UUID, positionSeconds: Double) async throws {
         guard let track = tracksByPlaylist.values.flatMap({ $0 }).first(where: { $0.id == trackID }),
               let playlist = playlists.first(where: { $0.id == track.playlistId }) else { return }
+        let previousPlayCount = history.first(where: { $0.trackId == trackID })?.playCount ?? 0
         history.removeAll { $0.trackId == trackID }
-        history.insert(PlaybackHistoryItem(trackId: track.id, playlistId: track.playlistId, uploaderId: track.uploaderId, title: track.title, artistName: track.artistName, albumName: track.albumName, durationSeconds: track.durationSeconds, audioPath: track.audioPath, artworkPath: track.artworkPath, position: track.position, fileSizeBytes: track.fileSizeBytes, trackCreatedAt: track.createdAt, waveformSamples: track.waveformSamples, playlistTitle: playlist.title, playlistCoverPath: playlist.coverPath, lastPlayedAt: .now, playCount: 1), at: 0)
+        history.insert(PlaybackHistoryItem(trackId: track.id, playlistId: track.playlistId, uploaderId: track.uploaderId, title: track.title, artistName: track.artistName, albumName: track.albumName, durationSeconds: track.durationSeconds, audioPath: track.audioPath, artworkPath: track.artworkPath, position: track.position, fileSizeBytes: track.fileSizeBytes, trackCreatedAt: track.createdAt, waveformSamples: track.waveformSamples, playlistTitle: playlist.title, playlistCoverPath: playlist.coverPath, lastPlayedAt: .now, playCount: previousPlayCount + 1), at: 0)
     }
 
     func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem] { history }
+    func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem] {
+        let publicPlaylists = Dictionary(uniqueKeysWithValues: playlists.filter { $0.visibility == .publicAccess }.map { ($0.id, $0) })
+        let playCounts = Dictionary(uniqueKeysWithValues: history.map { ($0.trackId, $0.playCount) })
+        return tracksByPlaylist.values.flatMap { $0 }
+            .compactMap { track -> PublicTrackRankingItem? in
+                guard let playlist = publicPlaylists[track.playlistId] else { return nil }
+                return PublicTrackRankingItem(
+                    trackId: track.id, playlistId: track.playlistId, uploaderId: track.uploaderId,
+                    title: track.title, artistName: track.artistName, albumName: track.albumName,
+                    durationSeconds: track.durationSeconds, audioPath: track.audioPath,
+                    artworkPath: track.artworkPath, position: track.position,
+                    fileSizeBytes: track.fileSizeBytes, trackCreatedAt: track.createdAt,
+                    waveformSamples: track.waveformSamples, playlistTitle: playlist.title,
+                    playlistCoverPath: playlist.coverPath, playCount: playCounts[track.id] ?? 0
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.playCount == rhs.playCount ? lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending : lhs.playCount > rhs.playCount
+            }
+            .prefix(max(1, limit))
+            .map { $0 }
+    }
     func clearPlaybackHistory() async throws { history.removeAll() }
     func fetchNotifications() async throws -> [SocialNotification] { [] }
     func markAllNotificationsRead() async throws { }

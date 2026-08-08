@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 private enum DiscoverySection: String, CaseIterable, Identifiable {
-    case users, artists, playlists
+    case top, users, artists, playlists
     var id: String { rawValue }
-    var title: String { switch self { case .users: "Usuários"; case .artists: "Artistas"; case .playlists: "Playlists" } }
+    var title: String { switch self { case .top: "Top"; case .users: "Usuários"; case .artists: "Artistas"; case .playlists: "Playlists" } }
 }
 
 @MainActor
@@ -12,6 +12,7 @@ private final class DiscoveryViewModel: ObservableObject {
     @Published var profiles: [UserProfile] = []
     @Published var artists: [ArtistSummary] = []
     @Published var playlists: [Playlist] = []
+    @Published var topTracks: [PublicTrackRankingItem] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -22,9 +23,11 @@ private final class DiscoveryViewModel: ObservableObject {
             async let profiles = repository.searchProfiles(query: query)
             async let artists = repository.searchArtists(query: query)
             async let playlists = repository.searchPlaylists(query: query)
+            async let topTracks = repository.fetchTopPublicTracks(limit: 25)
             self.profiles = try await profiles
             self.artists = try await artists
             self.playlists = try await playlists
+            self.topTracks = try await topTracks
             errorMessage = nil
         } catch let error where error.isYePlyCancellation { return }
         catch { errorMessage = error.localizedDescription }
@@ -63,10 +66,11 @@ private final class DiscoveryViewModel: ObservableObject {
 
 struct DiscoveryView: View {
     @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     @StateObject private var model = DiscoveryViewModel()
     @State private var query = ""
-    @State private var section: DiscoverySection = .users
+    @State private var section: DiscoverySection = .top
 
     var body: some View {
         ScrollView {
@@ -124,6 +128,27 @@ struct DiscoveryView: View {
     @ViewBuilder
     private var results: some View {
         switch section {
+        case .top:
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("MAIS REPRODUZIDAS").font(.caption2.bold()).tracking(1.7).foregroundStyle(YePlyTheme.tertiary)
+                        Text("Top músicas públicas").font(.title3.bold())
+                    }
+                    Spacer()
+                    Image(systemName: "chart.bar.fill").foregroundStyle(YePlyTheme.accent)
+                }
+                if model.topTracks.isEmpty {
+                    ContentUnavailableView("Nenhuma reprodução pública", systemImage: "chart.bar", description: Text("O ranking aparecerá quando músicas de playlists públicas forem tocadas."))
+                        .frame(maxWidth: .infinity).padding(.top, 28)
+                } else {
+                    LazyVStack(spacing: 9) {
+                        ForEach(Array(model.topTracks.enumerated()), id: \.element.id) { entry in
+                            topTrackRow(entry.element, rank: entry.offset + 1)
+                        }
+                    }
+                }
+            }
         case .users:
             LazyVStack(spacing: 10) {
                 ForEach(model.profiles) { profile in
@@ -191,7 +216,47 @@ struct DiscoveryView: View {
     }
 
     private var currentResultCount: Int {
-        switch section { case .users: model.profiles.count; case .artists: model.artists.count; case .playlists: model.playlists.count }
+        switch section { case .top: model.topTracks.count; case .users: model.profiles.count; case .artists: model.artists.count; case .playlists: model.playlists.count }
+    }
+
+    private func topTrackRow(_ item: PublicTrackRankingItem, rank: Int) -> some View {
+        Button { playTopTrack(item) } label: {
+            HStack(spacing: 12) {
+                Text("\(rank)")
+                    .font(.headline.monospacedDigit().weight(.bold))
+                    .foregroundStyle(rank <= 3 ? YePlyTheme.accent : YePlyTheme.tertiary)
+                    .frame(width: 24)
+                PlayerArtworkView(track: item.track, artworkPath: item.playlistCoverPath)
+                    .frame(width: 54, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(item.artistName).font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+                    Text("\(item.playCount.formatted()) \(item.playCount == 1 ? "reprodução" : "reproduções")")
+                        .font(.caption2).foregroundStyle(YePlyTheme.tertiary)
+                }
+                Spacer()
+                Image(systemName: player.currentTrack?.id == item.trackId && player.isPlaying ? "waveform" : "play.fill")
+                    .foregroundStyle(YePlyTheme.accent)
+            }
+            .padding(10)
+            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Número \(rank), \(item.title), \(item.artistName), \(item.playCount) reproduções")
+    }
+
+    private func playTopTrack(_ item: PublicTrackRankingItem) {
+        let queue = model.topTracks.map(\.track)
+        Task {
+            await player.play(
+                item.track,
+                queue: queue,
+                repository: container.repository,
+                artworkPath: item.playlistCoverPath,
+                collectionTitle: "Top músicas públicas"
+            )
+        }
     }
 }
 

@@ -334,6 +334,70 @@ struct PlaybackHistoryItem: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+struct PublicTrackRankingItem: Codable, Identifiable, Hashable, Sendable {
+    let trackId: UUID
+    let playlistId: UUID
+    let uploaderId: UUID
+    let title: String
+    let artistName: String
+    let albumName: String?
+    let durationSeconds: Double
+    let audioPath: String
+    let artworkPath: String?
+    let position: Int
+    let fileSizeBytes: Int64?
+    let trackCreatedAt: Date?
+    let waveformSamples: [Double]?
+    let playlistTitle: String
+    let playlistCoverPath: String?
+    let playCount: Int
+
+    var id: UUID { trackId }
+    var track: Track {
+        Track(
+            id: trackId, playlistId: playlistId, uploaderId: uploaderId, title: title,
+            artistName: artistName, albumName: albumName, durationSeconds: durationSeconds,
+            audioPath: audioPath, artworkPath: artworkPath ?? playlistCoverPath, position: position,
+            fileSizeBytes: fileSizeBytes, createdAt: trackCreatedAt, waveformSamples: waveformSamples
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case trackId = "track_id"
+        case playlistId = "playlist_id"
+        case uploaderId = "uploader_id"
+        case title
+        case artistName = "artist_name"
+        case albumName = "album_name"
+        case durationSeconds = "duration_seconds"
+        case audioPath = "audio_path"
+        case artworkPath = "artwork_path"
+        case position
+        case fileSizeBytes = "file_size_bytes"
+        case trackCreatedAt = "track_created_at"
+        case waveformSamples = "waveform_samples"
+        case playlistTitle = "playlist_title"
+        case playlistCoverPath = "playlist_cover_path"
+        case playCount = "play_count"
+    }
+}
+
+enum ArtistCreditParser {
+    static func names(from credit: String) -> [String] {
+        credit
+            .split(separator: ",", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func key(for artistName: String) -> String {
+        artistName
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .lowercased()
+    }
+}
+
 enum SocialNotificationKind: String, Codable, Sendable {
     case newFollower = "new_follower"
     case playlistFollow = "playlist_follow"

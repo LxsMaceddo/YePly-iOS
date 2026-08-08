@@ -187,6 +187,10 @@ actor SupabaseMusicRepository: MusicRepository {
         try await client.rpc("playback_history_feed", params: ["p_limit": 150]).execute().value
     }
 
+    func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem] {
+        try await client.rpc("top_public_tracks", params: ["p_limit": min(max(limit, 1), 100)]).execute().value
+    }
+
     func clearPlaybackHistory() async throws {
         try await client.rpc("clear_playback_history").execute()
     }
