@@ -71,7 +71,11 @@ private struct CardTradeResponseInput: Encodable {
     let pAccept: Bool
     enum CodingKeys: String, CodingKey { case pTradeId = "p_trade_id"; case pAccept = "p_accept" }
 }
-private struct CardArtistInput: Encodable { let pArtistName: String; enum CodingKeys: String, CodingKey { case pArtistName = "p_artist_name" } }
+private struct ExternalCardCatalogInput: Encodable {
+    let artistName: String
+    enum CodingKeys: String, CodingKey { case artistName = "artist_name" }
+}
+private struct ExternalCardCatalogError: Decodable { let error: String? }
 private struct CardTradeableInput: Encodable { let pUsername: String; enum CodingKeys: String, CodingKey { case pUsername = "p_username" } }
 private struct CardTradeFeedResponse: Decodable { let trades: [CardTradeSummary] }
 private struct PlaylistUpdate: Encodable {
@@ -165,7 +169,12 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func signedAudioURL(for track: Track) async throws -> URL { try await signedURL(bucket: "audio", path: track.audioPath) }
-    func signedCoverURL(path: String) async throws -> URL { try await signedURL(bucket: "covers", path: path) }
+    func signedCoverURL(path: String) async throws -> URL {
+        if let url = URL(string: path), url.scheme?.lowercased() == "https" {
+            return url
+        }
+        return try await signedURL(bucket: "covers", path: path)
+    }
     func signedAvatarURL(path: String) async throws -> URL { try await signedURL(bucket: "avatars", path: path) }
 
     func searchProfiles(query: String) async throws -> [UserProfile] {
@@ -342,7 +351,18 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult {
-        try await client.rpc("sync_collectible_catalog", params: CardArtistInput(pArtistName: artistName)).execute().value
+        do {
+            return try await client.functions.invoke(
+                "sync-card-catalog",
+                options: FunctionInvokeOptions(
+                    body: ExternalCardCatalogInput(artistName: artistName),
+                    timeoutInterval: 120
+                )
+            )
+        } catch FunctionsError.httpError(_, let data) {
+            let detail = try? JSONDecoder().decode(ExternalCardCatalogError.self, from: data).error
+            throw YePlyError.message(detail ?? "Não foi possível sincronizar a discografia oficial.")
+        }
     }
 
     func refreshCardRarities() async throws -> CardRewardResult {

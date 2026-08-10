@@ -108,8 +108,7 @@ private final class CardsHubViewModel: ObservableObject {
     func syncKanye(repository: any MusicRepository) async {
         do {
             let reward = try await repository.syncCollectibleCatalog(artistName: "Kanye West")
-            _ = try await repository.refreshCardRarities()
-            rewardMessage = reward.message ?? "Catálogo de Kanye West sincronizado."
+            rewardMessage = reward.message ?? "Discografia oficial de Kanye West sincronizada."
             await load(repository: repository)
         } catch { errorMessage = error.localizedDescription }
     }
@@ -270,12 +269,12 @@ struct CardsHubView: View {
                     .padding(12).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
                 }
             }
-            Text("As raridades usam reproduções verificadas dentro do YePly. O Spotify não fornece contagem pública de plays por faixa.")
+            Text("Catálogo: MusicBrainz. Popularidade global: ListenBrainz. A raridade usa percentis por artista e fica preservada quando a carta é obtida.")
                 .font(.caption2).foregroundStyle(YePlyTheme.tertiary).padding(.top, 4)
             if session.isAdmin {
                 VStack(spacing: 9) {
                     Button { Task { await model.syncKanye(repository: container.repository) } } label: {
-                        Label("Sincronizar catálogo de Kanye West", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Sincronizar discografia oficial de Kanye West", systemImage: "arrow.triangle.2.circlepath")
                             .frame(maxWidth: .infinity).frame(height: 46)
                     }
                     Button { showingPackCodeCreator = true } label: {
@@ -419,12 +418,64 @@ private struct ResolvedCollectibleCard: View {
 
 private struct CardDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     let card: CollectibleCardItem
     var body: some View {
-        ScrollView { ResolvedCollectibleCard(card: card, style: .detailed).padding(18) }
+        ScrollView {
+            VStack(spacing: 16) {
+                ResolvedCollectibleCard(card: card, style: .detailed)
+                if card.catalogSource == "musicbrainz" {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Popularidade global", systemImage: "chart.bar.fill")
+                            .font(.headline)
+                        HStack {
+                            metric("Reproduções", value: card.globalListenCount)
+                            Divider().frame(height: 32)
+                            metric("Ouvintes", value: card.globalListenerCount)
+                            Divider().frame(height: 32)
+                            metric("Percentil", value: card.popularityScore.map { Int($0.rounded()) })
+                        }
+                        Text("Metadados do MusicBrainz e contagens agregadas do ListenBrainz. A raridade desta cópia não muda depois de obtida.")
+                            .font(.caption2)
+                            .foregroundStyle(YePlyTheme.tertiary)
+                        Button { if let url = spotifySearchURL { openURL(url) } } label: {
+                            Label("Buscar no Spotify", systemImage: "music.note")
+                                .frame(maxWidth: .infinity).frame(height: 44)
+                        }
+                        .buttonStyle(.borderedProminent).tint(.green)
+                        if let source = card.externalURL, let url = URL(string: source) {
+                            Link(destination: url) {
+                                Label("Ver fonte no MusicBrainz", systemImage: "arrow.up.right.square")
+                                    .frame(maxWidth: .infinity).frame(height: 40)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(14)
+                    .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
+                }
+            }
+            .padding(18)
+        }
             .navigationTitle("Carta #\(card.serialNumber)").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .yeplyBackground()
+    }
+
+    private func metric(_ title: String, value: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value?.formatted(.number.notation(.compactName)) ?? "—").font(.subheadline.bold())
+            Text(title).font(.caption2).foregroundStyle(YePlyTheme.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var spotifySearchURL: URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "open.spotify.com"
+        components.path = "/search/\([card.title, card.artistName].joined(separator: " "))"
+        return components.url
     }
 }
 

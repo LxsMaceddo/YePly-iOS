@@ -52,6 +52,11 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
     let artworkPath: String?
     let rarity: CollectibleCardRarity
     let acquiredAt: Date?
+    var externalURL: String? = nil
+    var catalogSource: String? = nil
+    var globalListenCount: Int? = nil
+    var globalListenerCount: Int? = nil
+    var popularityScore: Double? = nil
 
     var id: UUID { instanceId }
 
@@ -66,6 +71,11 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
         case artworkPath = "artwork_path"
         case rarity
         case acquiredAt = "acquired_at"
+        case externalURL = "external_url"
+        case catalogSource = "catalog_source"
+        case globalListenCount = "global_listen_count"
+        case globalListenerCount = "global_listener_count"
+        case popularityScore = "popularity_score"
     }
 }
 
