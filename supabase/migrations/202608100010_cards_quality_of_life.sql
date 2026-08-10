@@ -21,6 +21,21 @@ alter table public.collectible_card_definitions
   add constraint collectible_cards_popularity_ratio_check
   check (popularity_ratio between 0 and 1);
 
+-- Release-group artwork is canonical and avoids editions without front art.
+update public.collectible_albums
+set artwork_path = 'https://coverartarchive.org/release-group/' || source_release_group_id || '/front-500',
+    updated_at = now()
+where catalog_source = 'musicbrainz'
+  and source_release_group_id is not null;
+
+update public.collectible_card_definitions d
+set artwork_path = al.artwork_path,
+    updated_at = now()
+from public.collectible_albums al
+where al.id = d.album_id
+  and d.catalog_source = 'musicbrainz'
+  and al.artwork_path like 'https://coverartarchive.org/release-group/%';
+
 -- Keep legacy enum labels for backwards decoding, but stop assigning them.
 create or replace function public.card_rarity_rank(p_rarity public.card_rarity)
 returns smallint language sql immutable set search_path = '' as $$
