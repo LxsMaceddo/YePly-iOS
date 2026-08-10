@@ -45,10 +45,20 @@ final class SessionStore: ObservableObject {
         guard let client else { state = .signedOut; return }
         authListener?.cancel()
         authListener = Task { [weak self] in
-            for await (_, session) in client.auth.authStateChanges {
+            for await (event, session) in client.auth.authStateChanges {
                 guard let self else { return }
-                if let session { await self.loadProfile(userID: session.user.id) }
-                else { self.profile = nil; self.state = .signedOut }
+                if let session {
+                    await self.loadProfile(userID: session.user.id)
+                } else if event == .initialSession, let cached = self.cachedProfile() {
+                    // Keep downloaded music available when a token cannot be
+                    // refreshed yet because the app launched without internet.
+                    self.profile = cached
+                    self.state = .signedIn
+                } else if event == .signedOut {
+                    self.clearLocalSession()
+                } else if self.profile == nil {
+                    self.state = .signedOut
+                }
             }
         }
     }
@@ -79,10 +89,7 @@ final class SessionStore: ObservableObject {
 
     func signOut() async {
         if let client { try? await client.auth.signOut() }
-        isDemo = false
-        profile = nil
-        UserDefaults.standard.removeObject(forKey: cachedProfileKey)
-        state = .signedOut
+        clearLocalSession()
     }
 
     func enterDemo() {
@@ -179,6 +186,13 @@ final class SessionStore: ObservableObject {
     private func cachedProfile() -> UserProfile? {
         guard let data = UserDefaults.standard.data(forKey: cachedProfileKey) else { return nil }
         return try? JSONDecoder().decode(UserProfile.self, from: data)
+    }
+
+    private func clearLocalSession() {
+        isDemo = false
+        profile = nil
+        UserDefaults.standard.removeObject(forKey: cachedProfileKey)
+        state = .signedOut
     }
 
     private func localAvatarURL(userID: UUID) -> URL {

@@ -31,6 +31,7 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var showingCreate = false
     @State private var sortMode: SortMode = .recent
+    @State private var downloadsOnly = false
 
     private let columns = [
         GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top),
@@ -79,20 +80,24 @@ struct LibraryView: View {
         .yeplyBackground()
     }
 
-    private var loadKey: String { "\(scope.rawValue)-\(offlineLibrary.isConnected)-\(offlineLibrary.downloadedPlaylistCount)" }
+    private var loadKey: String {
+        "\(scope.rawValue)-\(offlineLibrary.isConnected)-\(offlineLibrary.downloadedPlaylistCount)-\(offlineLibrary.downloadedTrackCount)-\(downloadsOnly)"
+    }
 
     private var emptyDescription: String {
-        if offlineLibrary.isOfflineMode { return "Conecte-se à internet e baixe uma playlist para ouvi-la sem conexão." }
+        if isShowingDownloads { return "As músicas baixadas neste iPhone aparecerão aqui." }
         return scope == .shared ? "Abra um link do YePly para guardar uma playlist aqui." : "Crie uma playlist e adicione seus primeiros MP3."
     }
 
     private func loadLibrary() async {
-        if offlineLibrary.isOfflineMode {
+        if isShowingDownloads {
             model.useOffline(offlineLibrary.playlists(for: scope))
         } else {
             await model.load(scope: scope, repository: container.repository)
         }
     }
+
+    private var isShowingDownloads: Bool { offlineLibrary.isOfflineMode || downloadsOnly }
 
     private var header: some View {
         VStack(spacing: 18) {
@@ -129,20 +134,44 @@ struct LibraryView: View {
     }
 
     private var scopePicker: some View {
-        HStack(spacing: 5) {
-            ForEach(LibraryScope.allCases) { item in
-                Button(item.title) { withAnimation(.snappy) { scope = item } }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(scope == item ? .black : YePlyTheme.secondary)
-                    .padding(.horizontal, 15).frame(height: 36)
-                    .background(scope == item ? .white : .clear, in: Capsule())
-            }
-            Spacer()
-            Menu {
-                Picker("Ordenar", selection: $sortMode) {
-                    ForEach(SortMode.allCases) { mode in Label(mode.title, systemImage: mode.icon).tag(mode) }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 5) {
+                ForEach(LibraryScope.allCases) { item in
+                    Button(item.title) { withAnimation(.snappy) { scope = item } }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(scope == item ? .black : YePlyTheme.secondary)
+                        .padding(.horizontal, 15).frame(height: 36)
+                        .background(scope == item ? .white : .clear, in: Capsule())
                 }
-            } label: { Image(systemName: "arrow.up.arrow.down").foregroundStyle(YePlyTheme.secondary).frame(width: 36, height: 36).background(YePlyTheme.elevated, in: Circle()) }
+                Spacer()
+                Menu {
+                    Picker("Ordenar", selection: $sortMode) {
+                        ForEach(SortMode.allCases) { mode in Label(mode.title, systemImage: mode.icon).tag(mode) }
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down").foregroundStyle(YePlyTheme.secondary).frame(width: 36, height: 36).background(YePlyTheme.elevated, in: Circle()) }
+            }
+
+            Button {
+                guard !offlineLibrary.isOfflineMode else { return }
+                withAnimation(.snappy) { downloadsOnly.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isShowingDownloads ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    Text("Downloads")
+                    Text("\(offlineLibrary.downloadedTrackCount)")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 7)
+                        .frame(minHeight: 22)
+                        .background((isShowingDownloads ? Color.black : Color.white).opacity(0.12), in: Capsule())
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isShowingDownloads ? .black : .white)
+                .padding(.horizontal, 13)
+                .frame(height: 36)
+                .background(isShowingDownloads ? .white : YePlyTheme.elevated, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Downloads, \(offlineLibrary.downloadedTrackCount) músicas")
         }
     }
 

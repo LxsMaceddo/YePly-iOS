@@ -35,7 +35,12 @@ enum SupabaseProvider {
         return SupabaseClient(
             supabaseURL: url,
             supabaseKey: configuration.publishableKey,
-            options: .init(auth: .init(flowType: .pkce))
+            options: .init(
+                auth: .init(
+                    flowType: .pkce,
+                    emitLocalSessionAsInitialSession: true
+                )
+            )
         )
     }()
 }

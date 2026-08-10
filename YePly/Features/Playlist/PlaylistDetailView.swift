@@ -179,6 +179,9 @@ struct PlaylistDetailView: View {
                                 onAddToQueue: {
                                     player.addToQueue(track, repository: container.repository, artworkPath: playlist.coverPath, collectionTitle: playlist.title)
                                 },
+                                onOfflineDownload: {
+                                    Task { await offlineLibrary.downloadTrack(track, in: playlist, repository: container.repository) }
+                                },
                                 onDownload: {
                                     Task { await downloadManager.prepare(track: track, repository: container.repository, localURL: offlineLibrary.localAudioURL(for: track)) }
                                 },
@@ -301,6 +304,7 @@ private struct TrackRow: View {
     let onPlay: () -> Void
     let onPlayNext: () -> Void
     let onAddToQueue: () -> Void
+    let onOfflineDownload: () -> Void
     let onDownload: () -> Void
     let onInformation: () -> Void
     let onLike: () -> Void
@@ -341,12 +345,18 @@ private struct TrackRow: View {
                 Button("Tocar a seguir", systemImage: "text.line.first.and.arrowtriangle.forward", action: onPlayNext)
                 Button("Adicionar ao final da fila", systemImage: "text.badge.plus", action: onAddToQueue)
                 Divider()
+                if isAvailableOffline {
+                    Label("Disponível para ouvir offline", systemImage: "checkmark.circle.fill")
+                } else {
+                    Button("Baixar para ouvir offline", systemImage: "arrow.down.to.line", action: onOfflineDownload)
+                        .disabled(!canUseSocial)
+                }
                 Button(track.isLiked == true ? "Remover curtida" : "Curtir música", systemImage: track.isLiked == true ? "heart.slash" : "heart", action: onLike)
                     .disabled(!canUseSocial)
                 Button("Comentários (\(track.commentCount ?? 0))", systemImage: "bubble.left", action: onComments)
                     .disabled(!canUseSocial)
                 Divider()
-                Button("Baixar ou salvar MP3", systemImage: "arrow.down.circle", action: onDownload)
+                Button("Exportar arquivo MP3", systemImage: "square.and.arrow.down", action: onDownload)
                 Button("Informações da música", systemImage: "info.circle", action: onInformation)
                 if let onDelete {
                     Divider()

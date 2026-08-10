@@ -200,11 +200,12 @@ final class AudioPlayer: ObservableObject {
         errorMessage = nil
         do {
             let url: URL
-            if let preloadedNext, preloadedNext.trackID == track.id {
+            if let localURL = offlineLibrary.localAudioURL(for: track) {
+                url = localURL
+                self.preloadedNext = nil
+            } else if let preloadedNext, preloadedNext.trackID == track.id {
                 url = preloadedNext.url
                 self.preloadedNext = nil
-            } else if let localURL = offlineLibrary.localAudioURL(for: track) {
-                url = localURL
             } else {
                 guard offlineLibrary.isConnected else {
                     throw YePlyError.message("Esta música não foi baixada para ouvir offline.")
