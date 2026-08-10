@@ -150,6 +150,40 @@ struct CardAlbumProgress: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// An enabled card definition in an album, together with the caller's ownership state.
+/// This powers the exact list of tracks a collector is still missing.
+struct CardAlbumCatalogItem: Codable, Identifiable, Hashable, Sendable {
+    let definitionId: UUID
+    let albumId: UUID
+    let albumTitle: String
+    let artistKey: String
+    let artistName: String
+    let artworkPath: String?
+    let discNumber: Int?
+    let trackNumber: Int
+    let title: String
+    let rarity: CollectibleCardRarity
+    let ownedCount: Int
+    let ownedInstanceId: UUID?
+
+    var id: UUID { definitionId }
+    var isOwned: Bool { ownedCount > 0 }
+
+    enum CodingKeys: String, CodingKey {
+        case definitionId = "definition_id"
+        case albumId = "album_id"
+        case albumTitle = "album_title"
+        case artistKey = "artist_key"
+        case artistName = "artist_name"
+        case artworkPath = "artwork_path"
+        case discNumber = "disc_number"
+        case trackNumber = "track_number"
+        case title, rarity
+        case ownedCount = "owned_count"
+        case ownedInstanceId = "owned_instance_id"
+    }
+}
+
 struct CardAchievement: Codable, Identifiable, Hashable, Sendable {
     let achievementKey: String
     let title: String

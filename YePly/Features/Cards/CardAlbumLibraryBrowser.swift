@@ -6,6 +6,7 @@ import SwiftUI
 struct CardAlbumLibraryBrowser: View {
     let albums: [CardAlbumProgress]
     let cards: [CollectibleCardItem]
+    let catalog: [CardAlbumCatalogItem]
     let onSelectCard: (CollectibleCardItem) -> Void
 
     @State private var selectedArtist: CardBrowserArtistGroup?
@@ -13,10 +14,12 @@ struct CardAlbumLibraryBrowser: View {
     init(
         albums: [CardAlbumProgress],
         cards: [CollectibleCardItem],
+        catalog: [CardAlbumCatalogItem],
         onSelectCard: @escaping (CollectibleCardItem) -> Void
     ) {
         self.albums = albums
         self.cards = cards
+        self.catalog = catalog
         self.onSelectCard = onSelectCard
     }
 
@@ -60,6 +63,7 @@ struct CardAlbumLibraryBrowser: View {
             CardArtistAlbumsSheet(
                 artist: artist,
                 cards: cards,
+                catalog: catalog,
                 onSelectCard: onSelectCard
             )
         }
@@ -175,6 +179,7 @@ private struct CardArtistLibraryRow: View {
 private struct CardArtistAlbumsSheet: View {
     let artist: CardBrowserArtistGroup
     let cards: [CollectibleCardItem]
+    let catalog: [CardAlbumCatalogItem]
     let onSelectCard: (CollectibleCardItem) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -190,6 +195,7 @@ private struct CardArtistAlbumsSheet: View {
                             CardAlbumCollectionDetail(
                                 album: album,
                                 cards: cardsForAlbum(album),
+                                catalog: catalogForAlbum(album),
                                 onSelectCard: onSelectCard
                             )
                         } label: {
@@ -263,6 +269,18 @@ private struct CardArtistAlbumsSheet: View {
                 && CardBrowserNormalization.key($0.albumName) == albumKey
         }
     }
+
+    private func catalogForAlbum(_ album: CardAlbumProgress) -> [CardAlbumCatalogItem] {
+        catalog
+            .filter { $0.albumId == album.albumId }
+            .sorted {
+                let leftDisc = $0.discNumber ?? 1
+                let rightDisc = $1.discNumber ?? 1
+                if leftDisc != rightDisc { return leftDisc < rightDisc }
+                if $0.trackNumber != $1.trackNumber { return $0.trackNumber < $1.trackNumber }
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+    }
 }
 
 private struct CardAlbumLibraryRow: View {
@@ -317,6 +335,7 @@ private struct CardAlbumCollectionDetail: View {
 
     let album: CardAlbumProgress
     let cards: [CollectibleCardItem]
+    let catalog: [CardAlbumCatalogItem]
     let onSelectCard: (CollectibleCardItem) -> Void
 
     var body: some View {
@@ -337,15 +356,33 @@ private struct CardAlbumCollectionDetail: View {
                     .buttonStyle(.plain)
                 }
 
-                if missingCount > 0 {
-                    Text("AINDA FALTAM")
-                        .font(.caption2.bold())
-                        .tracking(1.6)
-                        .foregroundStyle(YePlyTheme.tertiary)
-                        .padding(.top, 9)
+                if expectedMissingCount > 0 {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("AINDA FALTAM")
+                            .font(.caption2.bold())
+                            .tracking(1.6)
+                            .foregroundStyle(YePlyTheme.tertiary)
+                        Spacer()
+                        Text("\(expectedMissingCount) \(expectedMissingCount == 1 ? "carta" : "cartas")")
+                            .font(.caption2.monospacedDigit().bold())
+                            .foregroundStyle(YePlyTheme.accent)
+                    }
+                    .padding(.top, 9)
 
-                    ForEach(0..<missingCount, id: \.self) { index in
-                        CardAlbumMissingTrackRow(index: album.ownedUnique + index + 1)
+                    if missingCards.isEmpty {
+                        Label(
+                            "Recarregue a coleção após sincronizar a discografia para identificar as faixas.",
+                            systemImage: "arrow.clockwise.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(YePlyTheme.secondary)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    } else {
+                        ForEach(missingCards) { card in
+                            CardAlbumMissingTrackRow(card: card)
+                        }
                     }
                 }
             }
@@ -404,7 +441,11 @@ private struct CardAlbumCollectionDetail: View {
             .sorted { $0.card.title.localizedStandardCompare($1.card.title) == .orderedAscending }
     }
 
-    private var missingCount: Int {
+    private var missingCards: [CardAlbumCatalogItem] {
+        catalog.filter { !$0.isOwned }
+    }
+
+    private var expectedMissingCount: Int {
         max(album.totalCards - album.ownedUnique, 0)
     }
 }
@@ -461,33 +502,50 @@ private struct CardAlbumOwnedTrackRow: View {
 }
 
 private struct CardAlbumMissingTrackRow: View {
-    let index: Int
+    let card: CardAlbumCatalogItem
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
+                CardBrowserArtwork(
+                    path: card.artworkPath,
+                    seed: card.definitionId.uuidString,
+                    title: card.title,
+                    tint: card.rarity.accentColor,
+                    cornerRadius: 13
+                )
+                .saturation(0.25)
+                .opacity(0.48)
+
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(YePlyTheme.elevatedStrong)
+                    .fill(.black.opacity(0.28))
                 Image(systemName: "lock.fill")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(YePlyTheme.tertiary)
+                    .foregroundStyle(.white)
             }
             .frame(width: 58, height: 58)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Carta não encontrada")
+                Text(card.title)
                     .font(.subheadline.bold())
-                    .foregroundStyle(YePlyTheme.secondary)
-                Text("Abra packs ou faça uma troca")
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Label(card.rarity.title, systemImage: card.rarity.symbolName)
                     .font(.caption2)
-                    .foregroundStyle(YePlyTheme.tertiary)
+                    .foregroundStyle(card.rarity.accentColor)
             }
 
             Spacer()
 
-            Text("#\(index)")
-                .font(.caption2.monospacedDigit().bold())
-                .foregroundStyle(YePlyTheme.tertiary)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text((card.discNumber ?? 1) > 1 ? "Disco \(card.discNumber ?? 1)" : "Faixa")
+                    .font(.caption2)
+                    .foregroundStyle(YePlyTheme.tertiary)
+                Text("#\(card.trackNumber)")
+                    .font(.caption.monospacedDigit().bold())
+                    .foregroundStyle(YePlyTheme.secondary)
+            }
         }
         .padding(10)
         .background {
@@ -500,7 +558,7 @@ private struct CardAlbumMissingTrackRow: View {
                 }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Carta ainda não obtida")
+        .accessibilityLabel("Carta ainda não obtida: \(card.title), raridade \(card.rarity.title)")
     }
 }
 

@@ -328,6 +328,10 @@ actor SupabaseMusicRepository: MusicRepository {
         try await client.rpc("card_album_progress").execute().value
     }
 
+    func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem] {
+        try await client.rpc("card_album_catalog_feed").execute().value
+    }
+
     func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge] {
         try await client.rpc(
             "profile_equipped_card_badges",

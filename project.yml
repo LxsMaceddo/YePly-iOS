@@ -18,8 +18,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yeply.app
-        MARKETING_VERSION: 2.3.3
-        CURRENT_PROJECT_VERSION: 14
+        MARKETING_VERSION: 2.4.0
+        CURRENT_PROJECT_VERSION: 15
         INFOPLIST_FILE: YePly/Support/Info.plist
         CODE_SIGN_ENTITLEMENTS: YePly/Support/YePly.entitlements
         TARGETED_DEVICE_FAMILY: 1

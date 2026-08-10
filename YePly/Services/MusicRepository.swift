@@ -51,6 +51,7 @@ protocol MusicRepository: Sendable {
     func fetchCardInventory() async throws -> [CollectibleCardItem]
     func fetchCardPacks() async throws -> [CardPackSummary]
     func fetchCardAlbumProgress() async throws -> [CardAlbumProgress]
+    func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem]
     func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge]
     func fetchCardAchievements() async throws -> [CardAchievement]
     func fetchCardArtists() async throws -> [CardArtistOption]
@@ -300,6 +301,7 @@ actor DemoMusicRepository: MusicRepository {
     func fetchCardAlbumProgress() async throws -> [CardAlbumProgress] {
         [CardAlbumProgress(albumId: UUID(), albumTitle: "Coleção de demonstração", artistName: "YePly Sessions", artworkPath: nil, ownedUnique: demoCards.count, totalCards: 13, isComplete: false, badgeId: nil, badgeEquipped: false)]
     }
+    func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem] { [] }
     func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge] {
         guard profileID == demoUserID else { return [] }
         return []

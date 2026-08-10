@@ -20,6 +20,7 @@ private final class CardsHubViewModel: ObservableObject {
     @Published var inventory: [CollectibleCardItem] = []
     @Published var packs: [CardPackSummary] = []
     @Published var albums: [CardAlbumProgress] = []
+    @Published var albumCatalog: [CardAlbumCatalogItem] = []
     @Published var achievements: [CardAchievement] = []
     @Published var artists: [CardArtistOption] = []
     @Published var trades: [CardTradeSummary] = []
@@ -45,6 +46,7 @@ private final class CardsHubViewModel: ObservableObject {
             self.inventory = try await inventory
             self.packs = try await packs
             self.albums = try await albums
+            self.albumCatalog = (try? await repository.fetchCardAlbumCatalog()) ?? []
             self.achievements = try await achievements
             self.artists = try await artists
             self.trades = try await trades
@@ -340,7 +342,7 @@ struct CardsHubView: View {
     }
 
     private var albumsSection: some View {
-        CardAlbumLibraryBrowser(albums: model.albums, cards: model.inventory) { selectedCard = $0 }
+        CardAlbumLibraryBrowser(albums: model.albums, cards: model.inventory, catalog: model.albumCatalog) { selectedCard = $0 }
     }
 
     private var achievementsSection: some View {
