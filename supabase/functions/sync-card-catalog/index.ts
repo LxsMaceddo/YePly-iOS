@@ -17,6 +17,7 @@ type KnownAlbum = {
 
 type KnownArtist = {
   mbid: string;
+  appleMusicID: string;
   displayName: string;
   aliases: string[];
   albums: KnownAlbum[];
@@ -28,6 +29,7 @@ type KnownArtist = {
 const knownArtists: KnownArtist[] = [
   {
     mbid: "164f0d73-1234-4e2c-8743-d77bf2191051",
+    appleMusicID: "2715720",
     displayName: "Kanye West",
     aliases: ["kanye west", "ye"],
     albums: [
@@ -75,6 +77,17 @@ type PopularityRow = {
   total_user_count?: number | null;
 };
 
+type AppleMusicSong = {
+  id?: string;
+  attributes?: {
+    name?: string;
+    artistName?: string;
+    albumName?: string;
+    url?: string;
+  };
+};
+type AppleMusicTopSongsResponse = { data?: AppleMusicSong[] };
+
 type ImportedTrack = {
   recording_mbid: string;
   title: string;
@@ -84,6 +97,9 @@ type ImportedTrack = {
   track_number: number;
   global_listens: number;
   global_listeners: number;
+  apple_music_id?: string;
+  apple_music_url?: string;
+  apple_music_rank?: number;
 };
 
 type ImportedAlbum = {
@@ -104,6 +120,17 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function normalize(value: string): string {
   return value.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ");
+}
+
+function songMatchKey(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("en-US")
+    .replace(/[’']/g, "")
+    .replace(/\s*[([{](feat\.?|ft\.?|with)\b[^\])}]*[\])}]/gi, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function sleep(milliseconds: number): Promise<void> {
@@ -238,6 +265,36 @@ async function attachPopularity(albums: ImportedAlbum[]): Promise<void> {
   }
 }
 
+async function attachAppleMusicRanking(
+  artist: KnownArtist,
+  albums: ImportedAlbum[],
+  developerToken: string,
+  storefront: string,
+): Promise<number> {
+  const response = await fetchWithRetry(
+    `https://api.music.apple.com/v1/catalog/${encodeURIComponent(storefront)}/artists/${artist.appleMusicID}/view/top-songs?limit=100&with=attributes`,
+    { headers: { Authorization: `Bearer ${developerToken}` } },
+  );
+  const payload = (await response.json()) as AppleMusicTopSongsResponse;
+  const candidates = albums.flatMap((album) => album.tracks.map((track) => ({ album, track })));
+  let matched = 0;
+  for (const [index, song] of (payload.data ?? []).entries()) {
+    const attributes = song.attributes;
+    if (!song.id || !attributes?.name) continue;
+    const titleKey = songMatchKey(attributes.name);
+    const matches = candidates.filter((candidate) => songMatchKey(candidate.track.title) === titleKey);
+    if (matches.length === 0) continue;
+    const albumKey = songMatchKey(attributes.albumName ?? "");
+    const selected = matches.find((candidate) => songMatchKey(candidate.album.title) === albumKey) ?? matches[0];
+    if (selected.track.apple_music_rank != null && selected.track.apple_music_rank <= index + 1) continue;
+    selected.track.apple_music_id = song.id;
+    selected.track.apple_music_url = attributes.url;
+    selected.track.apple_music_rank = index + 1;
+    matched += 1;
+  }
+  return matched;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
@@ -258,6 +315,11 @@ Deno.serve(async (request) => {
       await sleep(1_100);
     }
     await attachPopularity(albums);
+    const appleMusicToken = Deno.env.get("APPLE_MUSIC_DEVELOPER_TOKEN")?.trim();
+    const appleMusicStorefront = normalize(Deno.env.get("APPLE_MUSIC_STOREFRONT") ?? "us");
+    const appleMusicMatches = appleMusicToken
+      ? await attachAppleMusicRanking(artist, albums, appleMusicToken, appleMusicStorefront)
+      : 0;
 
     const supabaseURL = Deno.env.get("SUPABASE_URL");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
@@ -276,7 +338,34 @@ Deno.serve(async (request) => {
     };
     const { data, error } = await supabase.rpc("import_external_card_catalog", { p_payload: payload });
     if (error) throw new Error(`database_import_failed:${error.message}`);
-    return jsonResponse(data);
+    if (appleMusicToken && appleMusicMatches > 0) {
+      const rankedRows = albums.flatMap((album) => album.tracks)
+        .filter((track) => track.apple_music_rank != null)
+        .map((track) => ({
+          recording_mbid: track.recording_mbid,
+          apple_music_id: track.apple_music_id,
+          apple_music_url: track.apple_music_url,
+          rank: track.apple_music_rank,
+        }));
+      const { error: rankingError } = await supabase.rpc("import_apple_music_card_ranking", {
+        p_artist_mbid: artist.mbid,
+        p_storefront: appleMusicStorefront,
+        p_rows: rankedRows,
+      });
+      if (rankingError) throw new Error(`apple_music_import_failed:${rankingError.message}`);
+    }
+    const result = data && typeof data === "object" ? data as Record<string, unknown> : {};
+    const baseMessage = typeof result.message === "string" ? result.message : "Catálogo sincronizado.";
+    return jsonResponse({
+      ...result,
+      success: true,
+      apple_music_enabled: Boolean(appleMusicToken),
+      apple_music_matches: appleMusicMatches,
+      apple_music_storefront: appleMusicStorefront,
+      message: appleMusicToken
+        ? `${baseMessage} Apple Music: ${appleMusicMatches} músicas ranqueadas.`
+        : `${baseMessage} Apple Music ainda não configurado; usando popularidade global.`,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
     console.error(message);

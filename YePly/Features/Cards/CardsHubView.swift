@@ -269,7 +269,7 @@ struct CardsHubView: View {
                     .padding(12).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
                 }
             }
-            Text("Catálogo: MusicBrainz. Popularidade global: ListenBrainz. A raridade usa percentis por artista e fica preservada quando a carta é obtida.")
+            Text("Catálogo oficial: MusicBrainz. Raridade híbrida: audições globais, ouvintes, Top Songs do Apple Music e reproduções no YePly. A raridade fica preservada quando a carta é obtida.")
                 .font(.caption2).foregroundStyle(YePlyTheme.tertiary).padding(.top, 4)
             if session.isAdmin {
                 VStack(spacing: 9) {
@@ -292,9 +292,9 @@ struct CardsHubView: View {
             if model.inventory.isEmpty {
                 ContentUnavailableView("Sua coleção está vazia", systemImage: "rectangle.stack", description: Text("Abra seu primeiro pack para receber três cartas."))
             } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                LazyVStack(spacing: 10) {
                     ForEach(model.inventory) { card in
-                        Button { selectedCard = card } label: { ResolvedCollectibleCard(card: card, style: .compact) }
+                        Button { selectedCard = card } label: { CardCollectionListRow(card: card) }
                             .buttonStyle(.plain)
                     }
                 }
@@ -416,6 +416,75 @@ private struct ResolvedCollectibleCard: View {
     }
 }
 
+private struct CardCollectionListRow: View {
+    @EnvironmentObject private var container: AppContainer
+    let card: CollectibleCardItem
+    @State private var artworkURL: URL?
+
+    var body: some View {
+        HStack(spacing: 13) {
+            artwork
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(card.rarity.accentColor.opacity(0.75), lineWidth: 1.5)
+                }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: card.rarity.symbolName).font(.caption2)
+                    Text(card.rarity.title.uppercased()).font(.caption2.bold()).tracking(1)
+                }
+                .foregroundStyle(card.rarity.accentColor)
+
+                Text(card.title).font(.headline).foregroundStyle(.white).lineLimit(1)
+                Text("\(card.artistName) · \(card.albumName)")
+                    .font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 8) {
+                Text("#\(card.serialNumber.formatted(.number.grouping(.never)))")
+                    .font(.caption2.monospacedDigit().bold()).foregroundStyle(YePlyTheme.secondary)
+                Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(YePlyTheme.tertiary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(YePlyTheme.elevated)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2).fill(card.rarity.accentColor)
+                        .frame(width: 3).padding(.vertical, 18)
+                }
+        }
+        .contentShape(Rectangle())
+        .task(id: card.artworkPath) {
+            guard let path = card.artworkPath else { return }
+            artworkURL = try? await container.repository.signedCoverURL(path: path)
+        }
+    }
+
+    @ViewBuilder private var artwork: some View {
+        if let artworkURL {
+            AsyncImage(url: artworkURL) { phase in
+                if let image = phase.image { image.resizable().scaledToFill() }
+                else { placeholder }
+            }
+        } else {
+            placeholder
+        }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            LinearGradient(colors: [card.rarity.accentColor.opacity(0.7), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: "music.note").font(.title2.bold()).foregroundStyle(.white.opacity(0.75))
+        }
+    }
+}
+
 private struct CardDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -435,7 +504,7 @@ private struct CardDetailSheet: View {
                             Divider().frame(height: 32)
                             metric("Percentil", value: card.popularityScore.map { Int($0.rounded()) })
                         }
-                        Text("Metadados do MusicBrainz e contagens agregadas do ListenBrainz. A raridade desta cópia não muda depois de obtida.")
+                        Text("A raridade compara esta música apenas com a discografia do próprio artista. O cálculo combina audições e ouvintes globais, posição no Top Songs do Apple Music e reproduções no YePly. Esta cópia não muda depois de obtida.")
                             .font(.caption2)
                             .foregroundStyle(YePlyTheme.tertiary)
                         Button { if let url = spotifySearchURL { openURL(url) } } label: {

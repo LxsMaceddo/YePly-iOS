@@ -42,6 +42,19 @@ struct AdminDashboardView: View {
                 }
                 .buttonStyle(.plain)
 
+                NavigationLink { AdminPackGrantView() } label: {
+                    HStack {
+                        Image(systemName: "shippingbox.fill").foregroundStyle(YePlyTheme.accent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Entregar packs").fontWeight(.bold).foregroundStyle(.white)
+                            Text("Envie packs diretamente para uma conta").font(.caption).foregroundStyle(YePlyTheme.secondary)
+                        }
+                        Spacer(); Image(systemName: "chevron.right").foregroundStyle(YePlyTheme.tertiary)
+                    }
+                    .padding(16).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 15))
+                }
+                .buttonStyle(.plain)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text("SUAS PLAYLISTS").font(.caption2.weight(.bold)).tracking(2).foregroundStyle(YePlyTheme.tertiary)
                     ForEach(model.playlists) { playlist in

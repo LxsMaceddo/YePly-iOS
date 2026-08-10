@@ -56,6 +56,7 @@ protocol MusicRepository: Sendable {
     func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem]
     func claimDailyCardReward() async throws -> CardRewardResult
     func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID
+    func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult
     func redeemPackCode(_ code: String) async throws -> CardRewardResult
     func openCardPack(id: UUID) async throws -> [CollectibleCardItem]
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult
@@ -296,6 +297,7 @@ actor DemoMusicRepository: MusicRepository {
     func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem] { demoCards }
     func claimDailyCardReward() async throws -> CardRewardResult { demoReward("Pack diário recebido.") }
     func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID { UUID() }
+    func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult { demoReward("\(packCount) pack(s) enviado(s) para @\(username).") }
     func redeemPackCode(_ code: String) async throws -> CardRewardResult { demoReward("Código resgatado.") }
     func openCardPack(id: UUID) async throws -> [CollectibleCardItem] { demoCards }
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult { demoReward(nil) }

@@ -50,6 +50,8 @@ public enum CollectibleCardRarity: String, CaseIterable, Codable, Identifiable, 
     }
 
     fileprivate var primaryColor: Color { palette[0] }
+
+    public var accentColor: Color { primaryColor }
 }
 
 /// Data needed to render a card, deliberately independent from persistence and

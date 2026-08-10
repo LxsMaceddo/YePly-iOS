@@ -40,6 +40,22 @@ private struct CardPackCodeCreationInput: Encodable {
         case pRarityFloor = "p_rarity_floor"
     }
 }
+private struct AdminCardPackGrantInput: Encodable {
+    let pUsername: String
+    let pPackCount: Int
+    let pCardCount: Int
+    let pArtistKey: String?
+    let pRarityFloor: CollectibleCardRarity
+    let pReason: String?
+    enum CodingKeys: String, CodingKey {
+        case pUsername = "p_username"
+        case pPackCount = "p_pack_count"
+        case pCardCount = "p_card_count"
+        case pArtistKey = "p_artist_key"
+        case pRarityFloor = "p_rarity_floor"
+        case pReason = "p_reason"
+    }
+}
 private struct CardListeningInput: Encodable {
     let pTrackId: UUID
     let pListenedSeconds: Int
@@ -310,6 +326,16 @@ actor SupabaseMusicRepository: MusicRepository {
                 pCode: code, pLabel: label, pMaxRedemptions: maxRedemptions,
                 pExpiresAt: nil, pArtistKey: artistKey, pCardCount: cardCount,
                 pRarityFloor: rarityFloor
+            )
+        ).execute().value
+    }
+
+    func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult {
+        try await client.rpc(
+            "admin_grant_card_packs",
+            params: AdminCardPackGrantInput(
+                pUsername: username, pPackCount: packCount, pCardCount: cardCount,
+                pArtistKey: artistKey, pRarityFloor: rarityFloor, pReason: reason
             )
         ).execute().value
     }
