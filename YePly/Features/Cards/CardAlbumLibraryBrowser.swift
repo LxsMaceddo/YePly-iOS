@@ -302,6 +302,8 @@ private struct CardAlbumLibraryRow: View {
 }
 
 private struct CardAlbumCollectionDetail: View {
+    @Environment(\.dismiss) private var dismiss
+
     let album: CardAlbumProgress
     let cards: [CollectibleCardItem]
     let onSelectCard: (CollectibleCardItem) -> Void
@@ -342,6 +344,14 @@ private struct CardAlbumCollectionDetail: View {
         }
         .navigationTitle(album.albumTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    Label("Álbuns", systemImage: "chevron.left")
+                }
+            }
+        }
         .yeplyBackground()
     }
 

@@ -15,35 +15,40 @@ struct CardBrowserArtwork: View {
     @State private var didFail = false
 
     var body: some View {
-        ZStack {
-            placeholder
+        GeometryReader { proxy in
+            ZStack {
+                placeholder
 
-            if let resolvedURL, !didFail {
-                AsyncImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.22))) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .transition(.opacity)
-                    case .failure:
-                        placeholder
-                            .onAppear { didFail = true }
-                    case .empty:
-                        ProgressView()
-                            .tint(.white.opacity(0.65))
-                    @unknown default:
-                        placeholder
+                if let resolvedURL, !didFail {
+                    AsyncImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.22))) { phase in
+                        switch phase {
+                        case let .success(image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: proxy.size.width, height: proxy.size.height)
+                                .clipped()
+                                .transition(.opacity)
+                        case .failure:
+                            placeholder
+                                .onAppear { didFail = true }
+                        case .empty:
+                            ProgressView()
+                                .tint(.white.opacity(0.65))
+                        @unknown default:
+                            placeholder
+                        }
                     }
                 }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.white.opacity(0.09), lineWidth: 1)
+            }
+            .clipped()
         }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(.white.opacity(0.09), lineWidth: 1)
-        }
-        .clipped()
         .task(id: path) {
             resolvedURL = nil
             didFail = false
