@@ -297,8 +297,8 @@ struct SocialAvatarView: View {
         ZStack {
             Circle().fill(LinearGradient(colors: [YePlyTheme.accent, YePlyTheme.accentSoft], startPoint: .topLeading, endPoint: .bottomTrailing))
             if let avatarURL {
-                AsyncImage(url: avatarURL) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
+                YePlyRemoteImage(url: avatarURL) { phase in
+                    if case let .success(image) = phase { image.resizable().scaledToFill() }
                     else { initials }
                 }
             } else { initials }
@@ -320,6 +320,7 @@ struct PublicProfileView: View {
     @EnvironmentObject private var container: AppContainer
     @EnvironmentObject private var session: SessionStore
     @State private var current: UserProfile
+    @State private var equippedBadges: [EquippedAlbumBadge] = []
     @State private var errorMessage: String?
 
     init(profile: UserProfile) { _current = State(initialValue: profile) }
@@ -334,6 +335,9 @@ struct PublicProfileView: View {
                 }
                 if current.id != session.userID {
                     FollowButton(isFollowing: current.isFollowed ?? false) { Task { await toggleFollow() } }
+                }
+                if !equippedBadges.isEmpty {
+                    ProfileBadgeShowcase(badges: equippedBadges)
                 }
                 HStack(spacing: 10) {
                     socialMetric(current.followerCount ?? 0, "Seguidores")
@@ -358,7 +362,12 @@ struct PublicProfileView: View {
         .navigationTitle(current.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            do { current = try await container.repository.fetchProfile(id: current.id) }
+            do {
+                async let profile = container.repository.fetchProfile(id: current.id)
+                async let badges = container.repository.fetchEquippedCardBadges(profileID: current.id)
+                current = try await profile
+                equippedBadges = try await badges
+            }
             catch { errorMessage = error.localizedDescription }
         }
         .alert("Não foi possível carregar", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }

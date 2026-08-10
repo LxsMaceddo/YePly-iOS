@@ -331,8 +331,8 @@ struct PlayerArtworkView: View {
             if let localCoverImage {
                 Image(uiImage: localCoverImage).resizable().scaledToFill()
             } else if let coverURL {
-                AsyncImage(url: coverURL) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
+                YePlyRemoteImage(url: coverURL) { phase in
+                    if case let .success(image) = phase { image.resizable().scaledToFill() }
                     else { fallback }
                 }
             } else { fallback }

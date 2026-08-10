@@ -328,6 +328,13 @@ actor SupabaseMusicRepository: MusicRepository {
         try await client.rpc("card_album_progress").execute().value
     }
 
+    func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge] {
+        try await client.rpc(
+            "profile_equipped_card_badges",
+            params: ProfileIDInput(pProfileId: profileID)
+        ).execute().value
+    }
+
     func fetchCardAchievements() async throws -> [CardAchievement] {
         try await client.rpc("card_achievement_feed").execute().value
     }
@@ -428,8 +435,9 @@ actor SupabaseMusicRepository: MusicRepository {
     private func signedURL(bucket: String, path: String) async throws -> URL {
         let key = "\(bucket):\(path)"
         if let cached = signedURLCache[key], cached.expiresAt > Date().addingTimeInterval(30) { return cached.url }
-        let url = try await client.storage.from(bucket).createSignedURL(path: path, expiresIn: 600)
-        signedURLCache[key] = (url, Date().addingTimeInterval(570))
+        let lifetime = bucket == "audio" ? 600 : 3_600
+        let url = try await client.storage.from(bucket).createSignedURL(path: path, expiresIn: lifetime)
+        signedURLCache[key] = (url, Date().addingTimeInterval(TimeInterval(lifetime - 30)))
         return url
     }
 

@@ -134,8 +134,8 @@ private struct NotificationRow: View {
             ZStack {
                 Circle().fill(YePlyTheme.elevatedStrong)
                 if let avatarURL {
-                    AsyncImage(url: avatarURL) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill() }
+                    YePlyRemoteImage(url: avatarURL) { phase in
+                        if case let .success(image) = phase { image.resizable().scaledToFill() }
                         else { initials }
                     }
                 } else { initials }

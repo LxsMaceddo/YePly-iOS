@@ -13,6 +13,7 @@ struct CardGameDashboard: Codable, Hashable, Sendable {
     var completedTrades: Int
     var favoriteArtists: [String]
     var dailyClaimAvailable: Bool
+    var equippedBadges: [EquippedAlbumBadge]? = nil
 
     var levelProgress: Double {
         let previousThreshold = max(0, (level - 1) * (level - 1) * 500)
@@ -38,6 +39,25 @@ struct CardGameDashboard: Codable, Hashable, Sendable {
         case completedTrades = "completed_trades"
         case favoriteArtists = "favorite_artists"
         case dailyClaimAvailable = "daily_claim_available"
+        case equippedBadges = "equipped_badges"
+    }
+}
+
+struct EquippedAlbumBadge: Codable, Identifiable, Hashable, Sendable {
+    let badgeId: UUID
+    let albumId: UUID
+    let title: String
+    let artworkPath: String?
+    let slot: Int
+
+    var id: UUID { badgeId }
+
+    enum CodingKeys: String, CodingKey {
+        case badgeId = "badge_id"
+        case albumId = "album_id"
+        case title
+        case artworkPath = "artwork_path"
+        case slot
     }
 }
 
@@ -103,6 +123,8 @@ struct CardAlbumProgress: Codable, Identifiable, Hashable, Sendable {
     let albumId: UUID
     let albumTitle: String
     let artistName: String
+    var artistArtworkPath: String? = nil
+    var artistSourceURL: String? = nil
     let artworkPath: String?
     let ownedUnique: Int
     let totalCards: Int
@@ -117,6 +139,8 @@ struct CardAlbumProgress: Codable, Identifiable, Hashable, Sendable {
         case albumId = "album_id"
         case albumTitle = "album_title"
         case artistName = "artist_name"
+        case artistArtworkPath = "artist_artwork_path"
+        case artistSourceURL = "artist_source_url"
         case artworkPath = "artwork_path"
         case ownedUnique = "owned_unique"
         case totalCards = "total_cards"

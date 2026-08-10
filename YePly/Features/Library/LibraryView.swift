@@ -219,8 +219,8 @@ struct PlaylistArtworkView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
             } else if let coverURL {
-                AsyncImage(url: coverURL, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                    if let image = phase.image {
+                YePlyRemoteImage(url: coverURL, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
+                    if case let .success(image) = phase {
                         image
                             .resizable()
                             .scaledToFill()

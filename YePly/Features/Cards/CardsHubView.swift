@@ -482,8 +482,8 @@ private struct CardCollectionListRow: View {
 
     @ViewBuilder private var artwork: some View {
         if let artworkURL {
-            AsyncImage(url: artworkURL) { phase in
-                if let image = phase.image { image.resizable().scaledToFill() }
+            YePlyRemoteImage(url: artworkURL) { phase in
+                if case let .success(image) = phase { image.resizable().scaledToFill() }
                 else { placeholder }
             }
         } else {
@@ -777,11 +777,26 @@ private struct CardAlbumBadgeRow: View {
     }
 
     private var badgeIcon: some View {
-        Image(systemName: album.badgeEquipped ? "checkmark.seal.fill" : "seal.fill")
-            .font(.title2)
-            .foregroundStyle(album.badgeEquipped ? Color.green : YePlyTheme.accent)
-            .frame(width: 42, height: 42)
-            .background(YePlyTheme.elevatedStrong, in: Circle())
+        CardBrowserArtwork(
+            path: album.artworkPath,
+            seed: album.albumId.uuidString,
+            title: album.albumTitle,
+            tint: album.badgeEquipped ? .green : YePlyTheme.accent,
+            cornerRadius: 23
+        )
+        .frame(width: 46, height: 46)
+        .clipShape(Circle())
+        .overlay {
+            Circle().stroke(album.badgeEquipped ? Color.green : YePlyTheme.accent.opacity(0.75), lineWidth: 2)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if album.badgeEquipped {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white, .green)
+                    .background(.black, in: Circle())
+            }
+        }
     }
 }
 

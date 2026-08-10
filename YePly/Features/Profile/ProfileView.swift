@@ -11,6 +11,7 @@ struct ProfileView: View {
     @State private var showingEditor = false
     @State private var avatarURL: URL?
     @State private var socialProfile: UserProfile?
+    @State private var equippedBadges: [EquippedAlbumBadge] = []
 
     var body: some View {
         ScrollView {
@@ -62,6 +63,10 @@ struct ProfileView: View {
                     .buttonStyle(.bordered)
                 }
                 .frame(maxWidth: .infinity)
+
+                if !equippedBadges.isEmpty {
+                    ProfileBadgeShowcase(badges: equippedBadges)
+                }
 
                 if let tastes = session.profile?.tastes, !tastes.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -141,7 +146,10 @@ struct ProfileView: View {
         .task(id: session.profile?.avatarPath) { avatarURL = await session.avatarURL() }
         .task(id: session.profile?.id) {
             guard offlineLibrary.isConnected, let id = session.profile?.id else { return }
-            socialProfile = try? await container.repository.fetchProfile(id: id)
+            async let profile = container.repository.fetchProfile(id: id)
+            async let badges = container.repository.fetchEquippedCardBadges(profileID: id)
+            socialProfile = try? await profile
+            equippedBadges = (try? await badges) ?? []
         }
         .confirmationDialog("Sair do YePly?", isPresented: $showingSignOut, titleVisibility: .visible) {
             Button("Sair", role: .destructive) { Task { await session.signOut() } }
@@ -170,8 +178,8 @@ private struct ProfileAvatarView: View {
             if let url, url.isFileURL, let image = UIImage(contentsOfFile: url.path) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else if let url {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
+                YePlyRemoteImage(url: url) { phase in
+                    if case let .success(image) = phase { image.resizable().scaledToFill() }
                     else { Text(initials).font(.title.bold()).foregroundStyle(.white) }
                 }
             } else {
@@ -197,6 +205,56 @@ private struct ProfileMetric: View {
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+struct ProfileBadgeShowcase: View {
+    let badges: [EquippedAlbumBadge]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("BADGES EM DESTAQUE")
+                .font(.caption2.bold())
+                .tracking(1.7)
+                .foregroundStyle(YePlyTheme.tertiary)
+
+            HStack(spacing: 18) {
+                ForEach(badges.sorted { $0.slot < $1.slot }) { badge in
+                    VStack(spacing: 7) {
+                        CardBrowserArtwork(
+                            path: badge.artworkPath,
+                            seed: badge.albumId.uuidString,
+                            title: badge.title,
+                            tint: YePlyTheme.accent,
+                            cornerRadius: 40
+                        )
+                        .frame(width: 72, height: 72)
+                        .clipShape(Circle())
+                        .overlay {
+                            Circle().stroke(
+                                LinearGradient(
+                                    colors: [YePlyTheme.accent, .white.opacity(0.65)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 2
+                            )
+                        }
+                        .shadow(color: YePlyTheme.accent.opacity(0.22), radius: 10, y: 5)
+
+                        Text(badge.title)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(YePlyTheme.secondary)
+                            .lineLimit(1)
+                            .frame(width: 82)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
     }
 }
 

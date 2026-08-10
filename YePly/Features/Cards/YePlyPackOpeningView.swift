@@ -45,6 +45,9 @@ struct YePlyPackOpeningView: View {
         .preferredColorScheme(.dark)
         .background(YePlyTheme.background.ignoresSafeArea())
         .interactiveDismissDisabled(stage != .summary)
+        .task(id: cards.map(\.id)) {
+            await preloadArtwork()
+        }
     }
 
     private var topBar: some View {
@@ -260,6 +263,14 @@ struct YePlyPackOpeningView: View {
         cards.count == 1 ? "1 nova carta na sua coleção" : "\(cards.count) novas cartas na sua coleção"
     }
 
+    private func preloadArtwork() async {
+        for card in cards {
+            guard !Task.isCancelled else { return }
+            guard let url = await artworkResolver(card) else { continue }
+            _ = await YePlyRemoteImageLoader.shared.data(for: url)
+        }
+    }
+
     static func defaultArtworkResolver(for card: CollectibleCardItem) async -> URL? {
         guard let path = card.artworkPath else { return nil }
         return URL(string: path)
@@ -297,6 +308,9 @@ struct YePlyBulkPackOpeningView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .task(id: allCards.map(\.id)) {
+            await preloadArtwork()
+        }
     }
 
     private var bulkIntro: some View {
@@ -404,6 +418,14 @@ struct YePlyBulkPackOpeningView: View {
             }
         }
         .padding(.top, 5)
+    }
+
+    private func preloadArtwork() async {
+        for card in allCards {
+            guard !Task.isCancelled else { return }
+            guard let url = await artworkResolver(card) else { continue }
+            _ = await YePlyRemoteImageLoader.shared.data(for: url)
+        }
     }
 }
 

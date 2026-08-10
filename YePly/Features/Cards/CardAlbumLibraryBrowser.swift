@@ -72,6 +72,8 @@ struct CardAlbumLibraryBrowser: View {
                 return CardBrowserArtistGroup(
                     id: key,
                     name: first.artistName,
+                    artworkPath: first.artistArtworkPath,
+                    sourceURL: first.artistSourceURL,
                     albums: albums.sorted { $0.albumTitle.localizedStandardCompare($1.albumTitle) == .orderedAscending }
                 )
             }
@@ -82,6 +84,8 @@ struct CardAlbumLibraryBrowser: View {
 private struct CardBrowserArtistGroup: Identifiable, Hashable {
     let id: String
     let name: String
+    let artworkPath: String?
+    let sourceURL: String?
     let albums: [CardAlbumProgress]
 
     var totalCards: Int { albums.reduce(0) { $0 + $1.totalCards } }
@@ -101,7 +105,7 @@ private struct CardArtistLibraryRow: View {
                 seed: artist.id,
                 title: artist.name,
                 tint: YePlyTheme.accent,
-                cornerRadius: 18
+                cornerRadius: 38
             )
             .frame(width: 76, height: 76)
 
@@ -162,7 +166,8 @@ private struct CardArtistLibraryRow: View {
 
     private var representativeArtwork: String? {
         let artistKey = CardBrowserNormalization.key(artist.name)
-        return artist.albums.lazy.compactMap(\.artworkPath).first
+        return artist.artworkPath
+            ?? artist.albums.lazy.compactMap(\.artworkPath).first
             ?? cards.first { CardBrowserNormalization.key($0.artistName) == artistKey }?.artworkPath
     }
 }
@@ -213,14 +218,15 @@ private struct CardArtistAlbumsSheet: View {
     private var artistHero: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .center, spacing: 13) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [YePlyTheme.accent, YePlyTheme.accentSoft], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: "music.mic")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
-                }
+                CardBrowserArtwork(
+                    path: artist.artworkPath,
+                    seed: artist.id,
+                    title: artist.name,
+                    tint: YePlyTheme.accent,
+                    cornerRadius: 27
+                )
                 .frame(width: 54, height: 54)
+                .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("DISCOGRAFIA")
@@ -229,6 +235,11 @@ private struct CardArtistAlbumsSheet: View {
                         .foregroundStyle(YePlyTheme.accent)
                     Text("\(artist.ownedCards) de \(artist.totalCards) cartas únicas")
                         .font(.headline)
+                    if let sourceURL = artist.sourceURL, let url = URL(string: sourceURL) {
+                        Link("Imagem do Spotify", destination: url)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
                 }
 
                 Spacer()

@@ -270,7 +270,7 @@ public struct CollectibleCardView: View {
             CardArtworkPlaceholder(seed: model.id, rarity: model.rarity, title: model.title)
 
             if let artworkURL = model.artworkURL {
-                AsyncImage(url: artworkURL) { phase in
+                YePlyRemoteImage(url: artworkURL, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
                     if case let .success(image) = phase {
                         image
                             .resizable()

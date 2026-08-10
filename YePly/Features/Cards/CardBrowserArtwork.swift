@@ -20,7 +20,7 @@ struct CardBrowserArtwork: View {
                 placeholder
 
                 if let resolvedURL, !didFail {
-                    AsyncImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.22))) { phase in
+                    YePlyRemoteImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
                         switch phase {
                         case let .success(image):
                             image
@@ -35,8 +35,6 @@ struct CardBrowserArtwork: View {
                         case .empty:
                             ProgressView()
                                 .tint(.white.opacity(0.65))
-                        @unknown default:
-                            placeholder
                         }
                     }
                 }

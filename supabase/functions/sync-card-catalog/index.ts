@@ -18,6 +18,7 @@ type KnownAlbum = {
 type KnownArtist = {
   mbid: string;
   appleMusicID: string;
+  spotifyID: string;
   displayName: string;
   aliases: string[];
   albums: KnownAlbum[];
@@ -30,6 +31,7 @@ const knownArtists: KnownArtist[] = [
   {
     mbid: "164f0d73-1234-4e2c-8743-d77bf2191051",
     appleMusicID: "2715720",
+    spotifyID: "5K4W6rqBFWDnAN6FQUkS6x",
     displayName: "Kanye West",
     aliases: ["kanye west", "ye"],
     albums: [
@@ -87,6 +89,15 @@ type AppleMusicSong = {
   };
 };
 type AppleMusicTopSongsResponse = { data?: AppleMusicSong[] };
+type SpotifyOEmbedResponse = {
+  title?: string;
+  thumbnail_url?: string | null;
+};
+type SpotifyArtistProfile = {
+  artistID: string;
+  url: string;
+  artworkURL: string;
+};
 
 type ImportedTrack = {
   recording_mbid: string;
@@ -298,6 +309,21 @@ async function attachAppleMusicRanking(
   return matched;
 }
 
+async function fetchSpotifyArtistProfile(artist: KnownArtist): Promise<SpotifyArtistProfile> {
+  const spotifyURL = `https://open.spotify.com/artist/${artist.spotifyID}`;
+  const response = await fetchWithRetry(
+    `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyURL)}`,
+    {},
+    2,
+  );
+  const payload = (await response.json()) as SpotifyOEmbedResponse;
+  const artworkURL = payload.thumbnail_url?.trim() ?? "";
+  if (!artworkURL.match(/^https:\/\/image-cdn-[A-Za-z0-9-]+\.spotifycdn\.com\/image\/[A-Za-z0-9]+$/)) {
+    throw new Error("invalid_spotify_artist_artwork");
+  }
+  return { artistID: artist.spotifyID, url: spotifyURL, artworkURL };
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
@@ -310,6 +336,13 @@ Deno.serve(async (request) => {
     const requestedName = normalize(body.artist_name ?? "Kanye West");
     const artist = knownArtists.find((candidate) => candidate.aliases.includes(requestedName));
     if (!artist) return jsonResponse({ error: "artist_not_curated_yet" }, 422);
+
+    let spotifyProfile: SpotifyArtistProfile | null = null;
+    try {
+      spotifyProfile = await fetchSpotifyArtistProfile(artist);
+    } catch (error) {
+      console.warn("spotify_artist_artwork_unavailable", error);
+    }
 
     const albums: ImportedAlbum[] = [];
     for (const album of artist.albums) {
@@ -357,6 +390,15 @@ Deno.serve(async (request) => {
     };
     const { data, error } = await supabase.rpc("import_external_card_catalog", { p_payload: payload });
     if (error) throw new Error(`database_import_failed:${error.message}`);
+    if (spotifyProfile) {
+      const { error: spotifyError } = await supabase.rpc("update_collectible_artist_spotify", {
+        p_artist_mbid: artist.mbid,
+        p_spotify_artist_id: spotifyProfile.artistID,
+        p_spotify_url: spotifyProfile.url,
+        p_artwork_url: spotifyProfile.artworkURL,
+      });
+      if (spotifyError) console.warn(`spotify_artist_update_failed:${spotifyError.message}`);
+    }
     if (appleMusicAvailable && appleMusicMatches > 0) {
       const rankedRows = albums.flatMap((album) => album.tracks)
         .filter((track) => track.apple_music_rank != null)
@@ -382,6 +424,7 @@ Deno.serve(async (request) => {
       apple_music_enabled: appleMusicAvailable,
       apple_music_matches: appleMusicMatches,
       apple_music_storefront: appleMusicStorefront,
+      spotify_artist_artwork: Boolean(spotifyProfile),
       message: appleMusicAvailable
         ? `${baseMessage} Apple Music: ${appleMusicMatches} músicas ranqueadas.`
         : listenBrainzAvailable
