@@ -663,7 +663,7 @@ private struct CardAlbumBadgeRow: View {
             .font(.title2)
             .foregroundStyle(album.badgeEquipped ? Color.green : YePlyTheme.accent)
             .frame(width: 42, height: 42)
-            .background(YePlyTheme.surface, in: Circle())
+            .background(YePlyTheme.elevatedStrong, in: Circle())
     }
 }
 
@@ -676,7 +676,7 @@ private struct CardAchievementProgressRow: View {
                 .font(.title3)
                 .foregroundStyle(achievement.isUnlocked ? YePlyTheme.accent : YePlyTheme.tertiary)
                 .frame(width: 36, height: 36)
-                .background(YePlyTheme.surface, in: Circle())
+                .background(YePlyTheme.elevatedStrong, in: Circle())
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(achievement.title).font(.subheadline.bold())
