@@ -35,6 +35,15 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 - Reprodução sem atraso com pré-carregamento da próxima faixa e fade configurável
 - Selo azul de artista verificado administrado somente por contas admin
 - Central de notificações e pop-ups para seguidores, curtidas e comentários
+- Aba Cartas com coleção em duas colunas, cinco raridades e visual detalhado próprio do YePly
+- Packs de três cartas por streak diário, códigos administrativos e tempo real de reprodução
+- Packs especiais de cinco cartas ao resgatar conquistas com um artista favorito
+- XP, níveis, ciclos de sete dias e oito conquistas iniciais
+- Progresso por álbum, badges permanentes e três posições equipáveis no perfil
+- Trocas atômicas entre usuários, cartas repetidas e bloqueio seguro somente da oferta
+- Catálogo de teste de Kanye West criado a partir das faixas públicas já cadastradas no YePly
+- Raridade baseada nas reproduções verificadas dentro do YePly, sem depender de contadores externos
+- Termos de Serviço e Política de Direitos Autorais pesquisáveis no cadastro e no perfil
 - Nome de usuário permanente protegido também por trigger no PostgreSQL
 - Reprodução em segundo plano
 - Links `https://yeply.app/p/<token>` e fallback `yeply://playlist/<token>`
@@ -53,7 +62,7 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 ## Configuração rápida
 
 1. Crie um projeto no Supabase.
-2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute as migrations pendentes em ordem, terminando em `202608080006_artist_credits_top_tracks.sql`.
+2. Em uma instalação nova, execute em ordem os arquivos de `supabase/migrations`. Em um projeto YePly já existente, execute as migrations pendentes em ordem, terminando em `202608090007_collectible_cards.sql`.
 3. Crie sua conta pelo aplicativo e depois execute `supabase/promote-admin.sql`, substituindo o e-mail.
 4. Em `YePly/Support/AppConfig.plist`, informe a URL e a **publishable key** do projeto. Nunca coloque a `service_role` no aplicativo.
 5. No Supabase Auth, mantenha a confirmação de e-mail ativada e adicione `yeply://auth/callback` aos Redirect URLs.
@@ -62,6 +71,7 @@ YePly é uma biblioteca musical privada e compartilhável feita em SwiftUI. O pr
 8. Substitua `yeply.app` no entitlement e em `AppConfig.plist` pelo seu domínio.
 9. Publique `web/.well-known/apple-app-site-association` sem extensão e com `Content-Type: application/json`. Troque `TEAM_ID` pelo Team ID da Apple.
 10. Execute no simulador ou iPhone. Para TestFlight, use Product → Archive.
+11. Antes de publicar, substitua os três e-mails entre colchetes em `YePly/Support/TermsOfService.md` e faça a revisão jurídica e de LGPD.
 
 Se preferir regenerar o projeto, `project.yml` é compatível com XcodeGen.
 
@@ -73,8 +83,8 @@ Um IPA sem assinatura é adequado para inspeção e posterior assinatura pelo Al
 
 ## Administração
 
-Administradores enxergam a aba **Admin** e podem gerenciar todo o catálogo. A função administrativa vem de `raw_app_meta_data`, que não pode ser alterada pelo usuário. A `service_role` deve existir somente em serviços confiáveis ou no painel do Supabase.
+Administradores acessam **Perfil → Administração** para gerenciar o catálogo. Na aba **Cartas**, também podem sincronizar o catálogo de Kanye West e criar códigos de packs. A função administrativa vem de `raw_app_meta_data`, que não pode ser alterada pelo usuário. A `service_role` deve existir somente em serviços confiáveis ou no painel do Supabase.
 
 ## Direitos autorais
 
-O YePly foi criado para músicas próprias, licenciadas, em domínio público ou cuja distribuição tenha sido autorizada. Antes de publicar, adicione termos de uso, política de remoção e um canal de denúncia adequado ao país de operação.
+O YePly foi criado para músicas próprias, licenciadas, em domínio público ou cuja distribuição tenha sido autorizada. Os termos fornecidos estão incluídos no aplicativo, mas ainda contêm três contatos legais pendentes e precisam de revisão profissional antes da publicação. Nomes, capas, fotos e metadados de artistas também exigem as permissões aplicáveis.

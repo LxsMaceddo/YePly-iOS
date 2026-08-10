@@ -63,6 +63,7 @@ struct NowPlayingView: View {
     @State private var isScrubbing = false
     @State private var commentMoment: PlayerCommentMoment?
     @State private var isCurrentArtistVerified = false
+    @State private var showingNowPlayingShare = false
 
     var body: some View {
         ZStack {
@@ -186,6 +187,11 @@ struct NowPlayingView: View {
                 .sheet(isPresented: $showingQueue) { PlaybackQueueView() }
                 .sheet(item: $commentMoment) { moment in TrackCommentsView(track: moment.track, initialTimestamp: moment.seconds) }
                 .sheet(item: $downloadManager.exportedFile) { file in ActivityShareSheet(items: [file.url]) }
+                .sheet(isPresented: $showingNowPlayingShare) {
+                    ActivityShareSheet(items: ["Estou ouvindo \(track.title), de \(track.artistName), no YePly."]) {
+                        Task { await player.recordNowPlayingShare() }
+                    }
+                }
                 .alert("Não foi possível salvar", isPresented: Binding(
                     get: { downloadManager.errorMessage != nil },
                     set: { if !$0 { downloadManager.errorMessage = nil } }
@@ -214,6 +220,9 @@ struct NowPlayingView: View {
                 Button("Ver fila de reprodução", systemImage: "list.bullet") { showingQueue = true }
                 Button("Comentar neste momento", systemImage: "bubble.left") {
                     commentMoment = PlayerCommentMoment(track: track, seconds: player.elapsedTime)
+                }
+                Button("Compartilhar o que estou ouvindo", systemImage: "square.and.arrow.up") {
+                    showingNowPlayingShare = true
                 }
             } label: {
                 Image(systemName: "ellipsis").font(.headline)
@@ -397,6 +406,14 @@ final class TrackFileDownloadManager: ObservableObject {
 
 struct ActivityShareSheet: UIViewControllerRepresentable {
     let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
+    var onComplete: (() -> Void)? = nil
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, completed, _, _ in
+            guard completed else { return }
+            DispatchQueue.main.async { onComplete?() }
+        }
+        return controller
+    }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
 }

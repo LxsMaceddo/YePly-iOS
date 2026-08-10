@@ -28,6 +28,13 @@ struct ProfileView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    NavigationLink { CardProfileShowcaseView() } label: {
+                        Image(systemName: "medal.star.fill")
+                            .frame(width: 38, height: 38)
+                            .background(YePlyTheme.elevated, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Badges e conquistas")
                     YePlyLogo(size: 34)
                 }
                 .padding(.top, 18)
@@ -80,6 +87,13 @@ struct ProfileView: View {
                 }
 
                 VStack(spacing: 0) {
+                    if session.isAdmin {
+                        NavigationLink { AdminDashboardView() } label: {
+                            ProfileRow(icon: "slider.horizontal.3", title: "Administração", subtitle: "Catálogo, uploads e artistas verificados")
+                        }
+                        .buttonStyle(.plain)
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                    }
                     NavigationLink { PlaybackHistoryView() } label: {
                         ProfileRow(icon: "clock.arrow.circlepath", title: "Histórico de reprodução", subtitle: "Veja tudo que você ouviu")
                     }
@@ -90,11 +104,19 @@ struct ProfileView: View {
                     }
                     .buttonStyle(.plain)
                     Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                    NavigationLink { FavoriteCardArtistsView() } label: {
+                        ProfileRow(icon: "star.fill", title: "Artistas favoritos", subtitle: "Escolha os artistas dos packs de conquista")
+                    }
+                    .buttonStyle(.plain)
+                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
                     ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Arquivos offline protegidos neste iPhone")
                     Divider().overlay(YePlyTheme.line).padding(.leading, 56)
                     ProfileRow(icon: "questionmark.circle", title: "Ajuda e suporte", subtitle: "Fale com a equipe YePly")
                     Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                    ProfileRow(icon: "doc.text", title: "Termos e direitos autorais", subtitle: "Regras para envio de músicas")
+                    NavigationLink { LegalTermsView() } label: {
+                        ProfileRow(icon: "doc.text", title: "Termos e direitos autorais", subtitle: "Regras para músicas, cartas e comunidade")
+                    }
+                    .buttonStyle(.plain)
                 }
                 .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 

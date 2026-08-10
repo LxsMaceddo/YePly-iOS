@@ -46,6 +46,27 @@ protocol MusicRepository: Sendable {
     func clearPlaybackHistory() async throws
     func fetchNotifications() async throws -> [SocialNotification]
     func markAllNotificationsRead() async throws
+    func fetchCardDashboard() async throws -> CardGameDashboard
+    func fetchCardInventory() async throws -> [CollectibleCardItem]
+    func fetchCardPacks() async throws -> [CardPackSummary]
+    func fetchCardAlbumProgress() async throws -> [CardAlbumProgress]
+    func fetchCardAchievements() async throws -> [CardAchievement]
+    func fetchCardArtists() async throws -> [CardArtistOption]
+    func fetchCardTrades() async throws -> [CardTradeSummary]
+    func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem]
+    func claimDailyCardReward() async throws -> CardRewardResult
+    func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID
+    func redeemPackCode(_ code: String) async throws -> CardRewardResult
+    func openCardPack(id: UUID) async throws -> [CollectibleCardItem]
+    func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult
+    func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult
+    func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult
+    func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID]) async throws -> UUID
+    func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult
+    func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult
+    func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult
+    func refreshCardRarities() async throws -> CardRewardResult
 }
 
 actor DemoMusicRepository: MusicRepository {
@@ -247,4 +268,59 @@ actor DemoMusicRepository: MusicRepository {
     func clearPlaybackHistory() async throws { history.removeAll() }
     func fetchNotifications() async throws -> [SocialNotification] { [] }
     func markAllNotificationsRead() async throws { }
+
+    func fetchCardDashboard() async throws -> CardGameDashboard {
+        CardGameDashboard(
+            xp: history.reduce(0) { $0 + $1.playCount * 5 }, level: 1, nextLevelXP: 500,
+            currentStreak: 1, bestStreak: 1, unopenedPacks: 1, totalCards: 3,
+            uniqueCards: 3, completedAlbums: 0, completedTrades: 0,
+            favoriteArtists: ["kanye west"], dailyClaimAvailable: true
+        )
+    }
+
+    func fetchCardInventory() async throws -> [CollectibleCardItem] { demoCards }
+    func fetchCardPacks() async throws -> [CardPackSummary] {
+        [CardPackSummary(packId: UUID(uuidString: "C1000000-0000-0000-0000-000000000001")!, source: "Boas-vindas", cardCount: 3, createdAt: .now)]
+    }
+    func fetchCardAlbumProgress() async throws -> [CardAlbumProgress] {
+        [CardAlbumProgress(albumId: UUID(), albumTitle: "Coleção de demonstração", artistName: "YePly Sessions", artworkPath: nil, ownedUnique: demoCards.count, totalCards: 13, isComplete: false, badgeId: nil, badgeEquipped: false)]
+    }
+    func fetchCardAchievements() async throws -> [CardAchievement] {
+        [
+            CardAchievement(achievementKey: "night_listener", title: "Night Listener", description: "Ouça 100 músicas entre 00:00 e 05:00.", icon: "moon.stars.fill", progress: 18, target: 100, unlockedAt: nil, rewardClaimedAt: nil),
+            CardAchievement(achievementKey: "day_one", title: "Day One", description: "Está no YePly desde a versão Beta.", icon: "figure.wave", progress: 1, target: 1, unlockedAt: .now, rewardClaimedAt: nil)
+        ]
+    }
+    func fetchCardArtists() async throws -> [CardArtistOption] { [CardArtistOption(artistKey: "kanye west", artistName: "Kanye West", cardCount: 3)] }
+    func fetchCardTrades() async throws -> [CardTradeSummary] { [] }
+    func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem] { demoCards }
+    func claimDailyCardReward() async throws -> CardRewardResult { demoReward("Pack diário recebido.") }
+    func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID { UUID() }
+    func redeemPackCode(_ code: String) async throws -> CardRewardResult { demoReward("Código resgatado.") }
+    func openCardPack(id: UUID) async throws -> [CollectibleCardItem] { demoCards }
+    func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult { demoReward(nil) }
+    func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult { demoReward("Artistas favoritos atualizados.") }
+    func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult { demoReward("Badge equipada.") }
+    func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult { demoReward("Pack de conquista recebido.") }
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID]) async throws -> UUID { UUID() }
+    func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult { demoReward(accept ? "Troca concluída." : "Troca recusada.") }
+    func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult { demoReward("Conquista Show Off atualizada.") }
+    func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult { demoReward("Catálogo sincronizado.") }
+    func refreshCardRarities() async throws -> CardRewardResult { demoReward("Raridades recalculadas.") }
+
+    private var demoCards: [CollectibleCardItem] {
+        let names = ["Stronger", "Heartless", "Flashing Lights"]
+        let rarities: [CollectibleCardRarity] = [.rare, .epic, .legendary]
+        return names.indices.map { index in
+            CollectibleCardItem(
+                instanceId: UUID(), serialNumber: index + 1, definitionId: UUID(), trackId: nil,
+                title: names[index], artistName: "Kanye West", albumName: "Demonstração",
+                artworkPath: nil, rarity: rarities[index], acquiredAt: .now
+            )
+        }
+    }
+
+    private func demoReward(_ message: String?) -> CardRewardResult {
+        CardRewardResult(success: true, message: message, packId: nil, packsAwarded: message == nil ? 0 : 1, xpAwarded: 5, streak: 1, achievementKey: nil, rewardClaimed: nil, packDropped: false, accepted: true, claimed: true, redeemed: true)
+    }
 }

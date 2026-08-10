@@ -43,11 +43,9 @@ struct MainTabView: View {
             NavigationStack { DiscoveryView() }
                 .tabItem { Label("Descobrir", systemImage: "magnifyingglass") }
                 .tag(2)
-            if session.isAdmin {
-                NavigationStack { AdminDashboardView() }
-                    .tabItem { Label("Admin", systemImage: "slider.horizontal.3") }
-                    .tag(3)
-            }
+            NavigationStack { CardsHubView() }
+                .tabItem { Label("Cartas", systemImage: "rectangle.stack.fill") }
+                .tag(3)
             NavigationStack { ProfileView() }
                 .tabItem { Label("Perfil", systemImage: "person.crop.circle") }
                 .tag(4)
@@ -69,10 +67,22 @@ struct MainTabView: View {
         }
         .overlay(alignment: .bottom) { playerOverlay }
         .overlay(alignment: .top) {
-            if let notification = notifications.toast {
-                NotificationToast(notification: notification, onOpen: notifications.openCenter, onDismiss: notifications.dismissToast)
-                    .padding(.horizontal, 12).safeAreaPadding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))
+            VStack(spacing: 8) {
+                if let notification = notifications.toast {
+                    NotificationToast(notification: notification, onOpen: notifications.openCenter, onDismiss: notifications.dismissToast)
+                        .padding(.horizontal, 12).transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if let message = player.cardRewardMessage {
+                    Label(message, systemImage: "rectangle.stack.fill")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .onTapGesture { player.cardRewardMessage = nil }
+                        .task(id: message) { try? await Task.sleep(for: .seconds(5)); player.cardRewardMessage = nil }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .safeAreaPadding(.top, 8)
         }
         .onChange(of: player.currentTrack?.id) { oldTrackID, newTrackID in
             if oldTrackID != newTrackID { withAnimation(.snappy) { isMiniPlayerHidden = false } }

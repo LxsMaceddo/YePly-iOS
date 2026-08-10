@@ -27,6 +27,7 @@ final class AudioPlayer: ObservableObject {
         didSet { UserDefaults.standard.set(fadeDuration, forKey: "yeply.playback.fadeDuration") }
     }
     @Published var errorMessage: String?
+    @Published var cardRewardMessage: String?
 
     private struct PlaybackContext {
         let artworkPath: String?
@@ -45,6 +46,9 @@ final class AudioPlayer: ObservableObject {
     private var fadeTask: Task<Void, Never>?
     private var waveformTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    private var cardListeningTask: Task<Void, Never>?
+    private var cardListeningSeconds: Double = 0
+    private var lastReportedCardListeningSeconds = 0
 
     init(offlineLibrary: OfflineLibraryStore) {
         self.offlineLibrary = offlineLibrary
@@ -62,6 +66,7 @@ final class AudioPlayer: ObservableObject {
         fadeTask?.cancel()
         waveformTask?.cancel()
         historyTask?.cancel()
+        cardListeningTask?.cancel()
     }
 
     var currentIndex: Int? {
@@ -180,6 +185,16 @@ final class AudioPlayer: ObservableObject {
         isRepeatingOne.toggle()
     }
 
+    func recordNowPlayingShare() async {
+        guard offlineLibrary.isConnected, let currentTrack, let repository else { return }
+        do {
+            let reward = try await repository.recordNowPlayingShare(trackID: currentTrack.id)
+            if reward.achievementKey != nil || reward.rewardClaimed == true {
+                cardRewardMessage = reward.message ?? "Conquista Show Off liberada."
+            }
+        } catch { }
+    }
+
     private func start(_ track: Track) async {
         guard let repository else { return }
         errorMessage = nil
@@ -242,6 +257,9 @@ final class AudioPlayer: ObservableObject {
         player = AVPlayer(playerItem: item)
         player?.automaticallyWaitsToMinimizeStalling = !gaplessPlaybackEnabled
         currentTrack = track
+        cardListeningSeconds = 0
+        lastReportedCardListeningSeconds = 0
+        cardListeningTask?.cancel()
         currentWaveform = track.waveformSamples?.isEmpty == false ? track.waveformSamples! : fallbackWaveform(for: track.id)
         duration = track.durationSeconds
         elapsedTime = 0
@@ -259,6 +277,10 @@ final class AudioPlayer: ObservableObject {
                 if itemDuration.isFinite, itemDuration > 0 { self.duration = itemDuration }
                 self.elapsedTime = seconds
                 self.progress = self.duration > 0 ? min(seconds / self.duration, 1) : 0
+                if self.isPlaying, self.offlineLibrary.isConnected {
+                    self.cardListeningSeconds += 0.5
+                    self.reportCardListeningIfNeeded()
+                }
                 if self.fadeDuration > 0, self.hasNext, self.isPlaying {
                     let remaining = max(0, self.duration - seconds)
                     if remaining <= self.fadeDuration {
@@ -287,6 +309,27 @@ final class AudioPlayer: ObservableObject {
                     self.updateNowPlaying(elapsed: self.duration)
                 }
             }
+        }
+    }
+
+    private func reportCardListeningIfNeeded() {
+        let listenedSeconds = Int(cardListeningSeconds)
+        guard listenedSeconds >= lastReportedCardListeningSeconds + 60,
+              cardListeningTask == nil,
+              let trackID = currentTrack?.id,
+              let repository else { return }
+        let intervalSeconds = min(max(listenedSeconds - lastReportedCardListeningSeconds, 15), 90)
+        lastReportedCardListeningSeconds = listenedSeconds
+        cardListeningTask = Task { [weak self] in
+            defer { self?.cardListeningTask = nil }
+            do {
+                let reward = try await repository.recordCardListening(trackID: trackID, listenedSeconds: intervalSeconds)
+                if reward.packDropped == true {
+                    self?.cardRewardMessage = reward.message ?? "Você ganhou um novo pack ouvindo música."
+                } else if let achievementKey = reward.achievementKey {
+                    self?.cardRewardMessage = reward.message ?? "Nova conquista: \(achievementKey)."
+                }
+            } catch { }
         }
     }
 

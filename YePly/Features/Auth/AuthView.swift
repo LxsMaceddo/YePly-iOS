@@ -10,6 +10,8 @@ struct AuthView: View {
     @State private var password = ""
     @State private var isWorking = false
     @State private var didRequestConfirmation = false
+    @State private var acceptedTerms = false
+    @State private var showingTerms = false
 
     enum Mode { case signIn, signUp }
 
@@ -40,6 +42,20 @@ struct AuthView: View {
                     }
                     AuthField(title: "E-mail", icon: "envelope", text: $email, keyboard: .emailAddress, capitalization: .never)
                     AuthField(title: "Senha", icon: "lock", text: $password, secure: true)
+                }
+
+                if mode == .signUp {
+                    HStack(alignment: .top, spacing: 10) {
+                        Toggle("Aceitar termos", isOn: $acceptedTerms).labelsHidden().tint(YePlyTheme.accent)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Li e concordo com os Termos de Serviço e a Política de Direitos Autorais.")
+                                .font(.footnote).foregroundStyle(YePlyTheme.secondary)
+                            Button("Ler os termos completos") { showingTerms = true }
+                                .font(.footnote.weight(.semibold)).foregroundStyle(YePlyTheme.accent)
+                        }
+                    }
+                    .padding(13)
+                    .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
                 if let message = session.errorMessage {
@@ -89,11 +105,17 @@ struct AuthView: View {
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
         }
+        .sheet(isPresented: $showingTerms) {
+            NavigationStack {
+                LegalTermsView()
+                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { showingTerms = false } } }
+            }
+        }
         .yeplyBackground()
     }
 
     private var isValid: Bool {
-        email.contains("@") && password.count >= 8 && (mode == .signIn || (!name.trimmingCharacters(in: .whitespaces).isEmpty && username.count >= 3))
+        email.contains("@") && password.count >= 8 && (mode == .signIn || (acceptedTerms && !name.trimmingCharacters(in: .whitespaces).isEmpty && username.count >= 3))
     }
 
     private func submit() {
