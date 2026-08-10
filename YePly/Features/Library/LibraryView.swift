@@ -209,17 +209,33 @@ struct PlaylistArtworkView: View {
     @State private var localCoverImage: UIImage?
 
     var body: some View {
-        Group {
+        ZStack {
+            CoverArtwork(playlist: playlist)
+
             if let localCoverImage {
-                Image(uiImage: localCoverImage).resizable().scaledToFill()
+                Image(uiImage: localCoverImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             } else if let coverURL {
-                AsyncImage(url: coverURL) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
-                    else { CoverArtwork(playlist: playlist) }
+                AsyncImage(url: coverURL, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                    }
                 }
-            } else { CoverArtwork(playlist: playlist) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .aspectRatio(1, contentMode: .fit)
+        .contentShape(Rectangle())
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .task(id: "\(playlist.coverPath ?? "none")-\(offlineLibrary.isPlaylistDownloaded(playlist.id))") {
             coverURL = nil

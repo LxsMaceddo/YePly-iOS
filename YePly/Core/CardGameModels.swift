@@ -57,6 +57,8 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
     var globalListenCount: Int? = nil
     var globalListenerCount: Int? = nil
     var popularityScore: Double? = nil
+    var artistPopularityRank: Int? = nil
+    var artistCatalogSize: Int? = nil
 
     var id: UUID { instanceId }
 
@@ -76,6 +78,8 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
         case globalListenCount = "global_listen_count"
         case globalListenerCount = "global_listener_count"
         case popularityScore = "popularity_score"
+        case artistPopularityRank = "artist_popularity_rank"
+        case artistCatalogSize = "artist_catalog_size"
     }
 }
 

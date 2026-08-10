@@ -1,10 +1,10 @@
 import Foundation
 import SwiftUI
 
-/// The five visual rarity tiers used by YePly collectible cards.
+/// The three visual rarity tiers used by YePly collectible cards.
 ///
-/// Each tier has a distinct symbol and name in addition to its color palette so
-/// rarity remains understandable when color differentiation is unavailable.
+/// `rare` and `legendary` remain decodable only so cards created by older
+/// versions keep working; the interface folds them into Common and Epic.
 public enum CollectibleCardRarity: String, CaseIterable, Codable, Identifiable, Sendable {
     case common
     case rare
@@ -12,38 +12,32 @@ public enum CollectibleCardRarity: String, CaseIterable, Codable, Identifiable, 
     case legendary
     case mythic
 
+    public static let allCases: [CollectibleCardRarity] = [.common, .epic, .mythic]
+
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .common: "Comum"
-        case .rare: "Rara"
-        case .epic: "Épica"
-        case .legendary: "Lendária"
+        case .common, .rare: "Comum"
+        case .epic, .legendary: "Épica"
         case .mythic: "Mítica"
         }
     }
 
     public var symbolName: String {
         switch self {
-        case .common: "circle.fill"
-        case .rare: "diamond.fill"
-        case .epic: "sparkles"
-        case .legendary: "crown.fill"
+        case .common, .rare: "circle.fill"
+        case .epic, .legendary: "sparkles"
         case .mythic: "star.fill"
         }
     }
 
     fileprivate var palette: [Color] {
         switch self {
-        case .common:
+        case .common, .rare:
             [Color(red: 0.52, green: 0.57, blue: 0.63), Color(red: 0.28, green: 0.32, blue: 0.38)]
-        case .rare:
-            [Color(red: 0.20, green: 0.76, blue: 0.96), Color(red: 0.23, green: 0.39, blue: 0.94)]
-        case .epic:
+        case .epic, .legendary:
             [Color(red: 0.77, green: 0.31, blue: 1.00), Color(red: 0.37, green: 0.18, blue: 0.86)]
-        case .legendary:
-            [Color(red: 1.00, green: 0.75, blue: 0.24), Color(red: 0.94, green: 0.35, blue: 0.18)]
         case .mythic:
             [Color(red: 1.00, green: 0.27, blue: 0.50), Color(red: 0.51, green: 0.24, blue: 1.00), Color(red: 0.15, green: 0.79, blue: 0.94)]
         }

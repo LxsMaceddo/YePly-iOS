@@ -92,6 +92,12 @@ private struct ExternalCardCatalogInput: Encodable {
     enum CodingKeys: String, CodingKey { case artistName = "artist_name" }
 }
 private struct ExternalCardCatalogError: Decodable { let error: String? }
+private struct MusicBrainzReleaseLookup: Decodable {
+    struct ReleaseGroup: Decodable { let id: String }
+    let releaseGroup: ReleaseGroup?
+
+    enum CodingKeys: String, CodingKey { case releaseGroup = "release-group" }
+}
 private struct CardTradeableInput: Encodable { let pUsername: String; enum CodingKeys: String, CodingKey { case pUsername = "p_username" } }
 private struct CardTradeFeedResponse: Decodable { let trades: [CardTradeSummary] }
 private struct PlaylistUpdate: Encodable {
@@ -105,6 +111,7 @@ private struct PlaylistUpdate: Encodable {
 actor SupabaseMusicRepository: MusicRepository {
     private let client: SupabaseClient
     private var signedURLCache: [String: (url: URL, expiresAt: Date)] = [:]
+    private var remoteCoverTasks: [String: Task<URL, Never>] = [:]
 
     init(client: SupabaseClient) { self.client = client }
 
@@ -186,10 +193,26 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func signedAudioURL(for track: Track) async throws -> URL { try await signedURL(bucket: "audio", path: track.audioPath) }
     func signedCoverURL(path: String) async throws -> URL {
-        if let url = URL(string: path), url.scheme?.lowercased() == "https" {
-            return url
+        let cleanPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPath.isEmpty else { throw YePlyError.message("Capa inválida.") }
+
+        if let url = URL(string: cleanPath), url.scheme?.lowercased() == "https" {
+            let cacheKey = "remote-cover:\(cleanPath)"
+            if let cached = signedURLCache[cacheKey], cached.expiresAt > Date() {
+                return cached.url
+            }
+            if let task = remoteCoverTasks[cleanPath] {
+                return await task.value
+            }
+
+            let task = Task { await Self.resolveRemoteCoverURL(url) }
+            remoteCoverTasks[cleanPath] = task
+            let resolvedURL = await task.value
+            remoteCoverTasks[cleanPath] = nil
+            signedURLCache[cacheKey] = (resolvedURL, Date().addingTimeInterval(86_400))
+            return resolvedURL
         }
-        return try await signedURL(bucket: "covers", path: path)
+        return try await signedURL(bucket: "covers", path: cleanPath)
     }
     func signedAvatarURL(path: String) async throws -> URL { try await signedURL(bucket: "avatars", path: path) }
 
@@ -268,6 +291,13 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem] {
         try await client.rpc("top_public_tracks", params: ["p_limit": min(max(limit, 1), 100)]).execute().value
+    }
+
+    func searchPublicTracks(query: String, limit: Int) async throws -> [PublicTrackRankingItem] {
+        try await client.rpc(
+            "search_public_tracks",
+            params: SearchInput(pQuery: query, pLimit: min(max(limit, 1), 100))
+        ).execute().value
     }
 
     func clearPlaybackHistory() async throws {
@@ -401,5 +431,51 @@ actor SupabaseMusicRepository: MusicRepository {
         let url = try await client.storage.from(bucket).createSignedURL(path: path, expiresIn: 600)
         signedURLCache[key] = (url, Date().addingTimeInterval(570))
         return url
+    }
+
+    /// Older card snapshots stored a Cover Art Archive URL for one particular
+    /// release. Some editions do not have artwork even though the album's
+    /// release group does. Resolve that one legacy shape to the preferred album
+    /// artwork, while leaving every other HTTPS provider untouched.
+    private static func resolveRemoteCoverURL(_ originalURL: URL) async -> URL {
+        guard originalURL.host?.lowercased() == "coverartarchive.org",
+              let releaseID = coverArtReleaseID(in: originalURL),
+              !(await remoteImageExists(originalURL))
+        else { return originalURL }
+
+        guard let lookupURL = URL(string: "https://musicbrainz.org/ws/2/release/\(releaseID)?fmt=json&inc=release-groups")
+        else { return originalURL }
+
+        var request = URLRequest(url: lookupURL)
+        request.timeoutInterval = 12
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("YePly/2.3 (https://yeply.app)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0),
+              let releaseGroup = try? JSONDecoder().decode(MusicBrainzReleaseLookup.self, from: data).releaseGroup,
+              UUID(uuidString: releaseGroup.id) != nil,
+              let fallbackURL = URL(string: "https://coverartarchive.org/release-group/\(releaseGroup.id.lowercased())/front-500")
+        else { return originalURL }
+        return fallbackURL
+    }
+
+    private static func coverArtReleaseID(in url: URL) -> String? {
+        let components = url.pathComponents.filter { $0 != "/" }
+        guard components.count >= 2,
+              components[0].lowercased() == "release",
+              UUID(uuidString: components[1]) != nil
+        else { return nil }
+        return components[1].lowercased()
+    }
+
+    private static func remoteImageExists(_ url: URL) async -> Bool {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 10
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let httpResponse = response as? HTTPURLResponse
+        else { return false }
+        return (200..<400).contains(httpResponse.statusCode)
     }
 }

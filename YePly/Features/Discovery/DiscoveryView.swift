@@ -198,7 +198,9 @@ struct DiscoveryView: View {
                     HStack(spacing: 13) {
                         NavigationLink(value: playlist) {
                             HStack(spacing: 13) {
-                                PlaylistArtworkView(playlist: playlist).frame(width: 58, height: 58)
+                                PlaylistArtworkView(playlist: playlist)
+                                    .frame(width: 58, height: 58)
+                                    .clipped()
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(playlist.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
                                     Text("\(playlist.artistName) • \(playlist.viewCount ?? 0) visualizações").font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)

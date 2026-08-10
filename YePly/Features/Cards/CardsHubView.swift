@@ -23,7 +23,8 @@ private final class CardsHubViewModel: ObservableObject {
     @Published var achievements: [CardAchievement] = []
     @Published var artists: [CardArtistOption] = []
     @Published var trades: [CardTradeSummary] = []
-    @Published var revealedCards: [CollectibleCardItem] = []
+    @Published var openedPack: YePlyOpenedPack?
+    @Published var openedPacks: [YePlyOpenedPack] = []
     @Published var rewardMessage: String?
     @Published var errorMessage: String?
     @Published var isLoading = false
@@ -75,9 +76,35 @@ private final class CardsHubViewModel: ObservableObject {
         isOpeningPack = true
         defer { isOpeningPack = false }
         do {
-            revealedCards = try await repository.openCardPack(id: pack.id)
+            let cards = try await repository.openCardPack(id: pack.id)
+            openedPack = YePlyOpenedPack(pack: pack, cards: cards)
             await load(repository: repository)
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    func openAll(repository: any MusicRepository) async {
+        guard !isOpeningPack, !packs.isEmpty else { return }
+        isOpeningPack = true
+        let packsToOpen = packs
+        var results: [YePlyOpenedPack] = []
+        defer { isOpeningPack = false }
+
+        do {
+            for pack in packsToOpen {
+                let cards = try await repository.openCardPack(id: pack.id)
+                results.append(YePlyOpenedPack(pack: pack, cards: cards))
+            }
+            openedPacks = results
+            await load(repository: repository)
+        } catch {
+            if !results.isEmpty {
+                openedPacks = results
+                rewardMessage = "Alguns packs foram abertos; os demais continuam guardados."
+                await load(repository: repository)
+            } else {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     func equip(_ album: CardAlbumProgress, repository: any MusicRepository) async {
@@ -168,8 +195,23 @@ struct CardsHubView: View {
                 model.rewardMessage = "Código \(createdCode) criado e pronto para compartilhar."
             }
         }
-        .sheet(isPresented: Binding(get: { !model.revealedCards.isEmpty }, set: { if !$0 { model.revealedCards = [] } })) {
-            CardPackRevealView(cards: model.revealedCards) { model.revealedCards = [] }
+        .fullScreenCover(item: $model.openedPack) { result in
+            YePlyPackOpeningView(
+                pack: result.pack,
+                cards: result.cards,
+                artworkResolver: cardArtworkResolver,
+                onComplete: { model.openedPack = nil; section = .collection }
+            )
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { !model.openedPacks.isEmpty },
+            set: { if !$0 { model.openedPacks = [] } }
+        )) {
+            YePlyBulkPackOpeningView(
+                openedPacks: model.openedPacks,
+                artworkResolver: cardArtworkResolver,
+                onComplete: { model.openedPacks = []; section = .collection }
+            )
         }
         .alert("Cartas", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
@@ -185,6 +227,13 @@ struct CardsHubView: View {
             }
         }
         .yeplyBackground()
+    }
+
+    private var cardArtworkResolver: YePlyCardArtworkResolver {
+        { card in
+            guard let path = card.artworkPath else { return nil }
+            return try? await container.repository.signedCoverURL(path: path)
+        }
     }
 
     private var header: some View {
@@ -251,12 +300,13 @@ struct CardsHubView: View {
                 ContentUnavailableView("Nenhum pack disponível", systemImage: "shippingbox", description: Text("Ouça músicas, mantenha seu streak ou use um código para ganhar packs."))
                     .padding(.top, 25)
             } else {
+                YePlyOpenAllPacksButton(packCount: model.packs.count, isOpening: model.isOpeningPack) {
+                    Task { await model.openAll(repository: container.repository) }
+                }
                 ForEach(model.packs) { pack in
                     HStack(spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 16).fill(LinearGradient(colors: [YePlyTheme.accent, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            Image(systemName: "rectangle.stack.fill").font(.title).foregroundStyle(.black.opacity(0.7))
-                        }.frame(width: 66, height: 76)
+                        YePlyCardPackView(pack: pack, compact: true)
+                            .frame(width: 66, height: 88)
                         VStack(alignment: .leading, spacing: 5) {
                             Text("PACK · \(pack.cardCount) CARTAS").font(.caption2.bold()).tracking(1.2).foregroundStyle(YePlyTheme.accent)
                             Text(pack.source).font(.headline).lineLimit(1)
@@ -269,8 +319,6 @@ struct CardsHubView: View {
                     .padding(12).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
                 }
             }
-            Text("Catálogo oficial: MusicBrainz. Raridade híbrida: audições globais, ouvintes, Top Songs do Apple Music e reproduções no YePly. A raridade fica preservada quando a carta é obtida.")
-                .font(.caption2).foregroundStyle(YePlyTheme.tertiary).padding(.top, 4)
             if session.isAdmin {
                 VStack(spacing: 9) {
                     Button { Task { await model.syncKanye(repository: container.repository) } } label: {
@@ -288,45 +336,11 @@ struct CardsHubView: View {
     }
 
     private var collectionSection: some View {
-        Group {
-            if model.inventory.isEmpty {
-                ContentUnavailableView("Sua coleção está vazia", systemImage: "rectangle.stack", description: Text("Abra seu primeiro pack para receber três cartas."))
-            } else {
-                LazyVStack(spacing: 10) {
-                    ForEach(model.inventory) { card in
-                        Button { selectedCard = card } label: { CardCollectionListRow(card: card) }
-                            .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
+        CardCollectionBrowser(cards: model.inventory) { selectedCard = $0 }
     }
 
     private var albumsSection: some View {
-        LazyVStack(spacing: 12) {
-            ForEach(model.albums) { album in
-                VStack(alignment: .leading, spacing: 11) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(album.albumTitle).font(.headline)
-                            Text(album.artistName).font(.caption).foregroundStyle(YePlyTheme.secondary)
-                        }
-                        Spacer()
-                        if album.isComplete {
-                            Button(album.badgeEquipped ? "Equipada" : "Usar badge") { Task { await model.equip(album, repository: container.repository) } }
-                                .font(.caption.bold()).buttonStyle(.bordered).tint(YePlyTheme.accent).disabled(album.badgeEquipped)
-                        }
-                    }
-                    ProgressView(value: album.progress).tint(album.isComplete ? .green : YePlyTheme.accent)
-                    HStack {
-                        Text("\(album.ownedUnique)/\(album.totalCards) cartas únicas").font(.caption).foregroundStyle(YePlyTheme.secondary)
-                        Spacer()
-                        if album.isComplete { Label("Badge liberada", systemImage: "checkmark.seal.fill").font(.caption.bold()).foregroundStyle(.green) }
-                    }
-                }
-                .padding(15).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17))
-            }
-        }
+        CardAlbumLibraryBrowser(albums: model.albums, cards: model.inventory) { selectedCard = $0 }
     }
 
     private var achievementsSection: some View {
@@ -487,13 +501,12 @@ private struct CardCollectionListRow: View {
 
 private struct CardDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     let card: CollectibleCardItem
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 ResolvedCollectibleCard(card: card, style: .detailed)
-                if card.catalogSource == "musicbrainz" {
+                if card.catalogSource != nil {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("Popularidade global", systemImage: "chart.bar.fill")
                             .font(.headline)
@@ -502,23 +515,15 @@ private struct CardDetailSheet: View {
                             Divider().frame(height: 32)
                             metric("Ouvintes", value: card.globalListenerCount)
                             Divider().frame(height: 32)
-                            metric("Percentil", value: card.popularityScore.map { Int($0.rounded()) })
+                            metric("Ranking", value: card.artistPopularityRank, suffix: card.artistCatalogSize.map { "/\($0)" })
                         }
-                        Text("A raridade compara esta música apenas com a discografia do próprio artista. O cálculo combina audições e ouvintes globais, posição no Top Songs do Apple Music e reproduções no YePly. Esta cópia não muda depois de obtida.")
-                            .font(.caption2)
-                            .foregroundStyle(YePlyTheme.tertiary)
-                        Button { if let url = spotifySearchURL { openURL(url) } } label: {
-                            Label("Buscar no Spotify", systemImage: "music.note")
+                        NavigationLink {
+                            CardYePlyTrackSearchView(card: card)
+                        } label: {
+                            Label("Buscar música nas playlists do YePly", systemImage: "magnifyingglass")
                                 .frame(maxWidth: .infinity).frame(height: 44)
                         }
-                        .buttonStyle(.borderedProminent).tint(.green)
-                        if let source = card.externalURL, let url = URL(string: source) {
-                            Link(destination: url) {
-                                Label("Ver fonte no MusicBrainz", systemImage: "arrow.up.right.square")
-                                    .frame(maxWidth: .infinity).frame(height: 40)
-                            }
-                            .buttonStyle(.bordered)
-                        }
+                        .buttonStyle(.borderedProminent).tint(YePlyTheme.accent)
                     }
                     .padding(14)
                     .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
@@ -531,21 +536,14 @@ private struct CardDetailSheet: View {
             .yeplyBackground()
     }
 
-    private func metric(_ title: String, value: Int?) -> some View {
+    private func metric(_ title: String, value: Int?, suffix: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value?.formatted(.number.notation(.compactName)) ?? "—").font(.subheadline.bold())
+            Text(value.map { $0.formatted(.number.notation(.compactName)) + (suffix ?? "") } ?? "—").font(.subheadline.bold())
             Text(title).font(.caption2).foregroundStyle(YePlyTheme.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var spotifySearchURL: URL? {
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = "open.spotify.com"
-        components.path = "/search/\([card.title, card.artistName].joined(separator: " "))"
-        return components.url
-    }
 }
 
 private struct CardPackRevealView: View {

@@ -60,7 +60,9 @@ struct AdminDashboardView: View {
                     ForEach(model.playlists) { playlist in
                         NavigationLink(value: playlist) {
                             HStack(spacing: 13) {
-                                CoverArtwork(playlist: playlist, cornerRadius: 11).frame(width: 58, height: 58)
+                                PlaylistArtworkView(playlist: playlist)
+                                    .frame(width: 58, height: 58)
+                                    .clipped()
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(playlist.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                                     Label(playlist.visibility.title, systemImage: playlist.visibility.icon).font(.caption).foregroundStyle(YePlyTheme.secondary)

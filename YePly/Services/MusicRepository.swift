@@ -43,6 +43,7 @@ protocol MusicRepository: Sendable {
     func recordPlayback(trackID: UUID, positionSeconds: Double) async throws
     func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem]
     func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem]
+    func searchPublicTracks(query: String, limit: Int) async throws -> [PublicTrackRankingItem]
     func clearPlaybackHistory() async throws
     func fetchNotifications() async throws -> [SocialNotification]
     func markAllNotificationsRead() async throws
@@ -266,6 +267,18 @@ actor DemoMusicRepository: MusicRepository {
             .prefix(max(1, limit))
             .map { $0 }
     }
+    func searchPublicTracks(query: String, limit: Int) async throws -> [PublicTrackRankingItem] {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await fetchTopPublicTracks(limit: 100)
+            .filter {
+                clean.isEmpty
+                    || $0.title.localizedCaseInsensitiveContains(clean)
+                    || $0.artistName.localizedCaseInsensitiveContains(clean)
+                    || $0.playlistTitle.localizedCaseInsensitiveContains(clean)
+            }
+            .prefix(max(1, limit))
+            .map { $0 }
+    }
     func clearPlaybackHistory() async throws { history.removeAll() }
     func fetchNotifications() async throws -> [SocialNotification] { [] }
     func markAllNotificationsRead() async throws { }
@@ -312,7 +325,7 @@ actor DemoMusicRepository: MusicRepository {
 
     private var demoCards: [CollectibleCardItem] {
         let names = ["Stronger", "Heartless", "Flashing Lights"]
-        let rarities: [CollectibleCardRarity] = [.rare, .epic, .legendary]
+        let rarities: [CollectibleCardRarity] = [.common, .epic, .mythic]
         return names.indices.map { index in
             CollectibleCardItem(
                 instanceId: UUID(), serialNumber: index + 1, definitionId: UUID(), trackId: nil,

@@ -7,7 +7,7 @@ const corsHeaders = {
 
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
 const LISTENBRAINZ_BASE = "https://api.listenbrainz.org/1";
-const USER_AGENT = "YePly/2.1 (https://yeply.app)";
+const USER_AGENT = "YePly/2.3 (https://yeply.app)";
 
 type KnownAlbum = {
   releaseGroupMBID: string;
@@ -238,7 +238,10 @@ async function fetchAlbum(album: KnownAlbum, fallbackArtist: string): Promise<Im
     release_mbid: release.id!,
     title: album.title,
     release_date: release.date?.match(/^\d{4}-\d{2}-\d{2}$/) ? release.date : null,
-    artwork_url: `https://coverartarchive.org/release/${release.id}/front-500`,
+    // A canonical release can legitimately have no front image even when the
+    // release group does. The release-group endpoint follows the preferred
+    // cover selected by Cover Art Archive and is therefore much more stable.
+    artwork_url: `https://coverartarchive.org/release-group/${album.releaseGroupMBID}/front-500`,
     tracks,
   };
 }
@@ -314,12 +317,28 @@ Deno.serve(async (request) => {
       // MusicBrainz asks clients to stay at or below one request per second per IP.
       await sleep(1_100);
     }
-    await attachPopularity(albums);
+    let listenBrainzAvailable = true;
+    try {
+      await attachPopularity(albums);
+    } catch (error) {
+      // Popularity is enrichment, not a prerequisite for importing the official
+      // discography. ListenBrainz can temporarily throttle or disable this
+      // endpoint; keeping the sync alive avoids an empty catalog in the app.
+      listenBrainzAvailable = false;
+      console.warn("listenbrainz_enrichment_unavailable", error);
+    }
     const appleMusicToken = Deno.env.get("APPLE_MUSIC_DEVELOPER_TOKEN")?.trim();
     const appleMusicStorefront = normalize(Deno.env.get("APPLE_MUSIC_STOREFRONT") ?? "us");
-    const appleMusicMatches = appleMusicToken
-      ? await attachAppleMusicRanking(artist, albums, appleMusicToken, appleMusicStorefront)
-      : 0;
+    let appleMusicMatches = 0;
+    let appleMusicAvailable = Boolean(appleMusicToken);
+    if (appleMusicToken) {
+      try {
+        appleMusicMatches = await attachAppleMusicRanking(artist, albums, appleMusicToken, appleMusicStorefront);
+      } catch (error) {
+        appleMusicAvailable = false;
+        console.warn("apple_music_enrichment_unavailable", error);
+      }
+    }
 
     const supabaseURL = Deno.env.get("SUPABASE_URL");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
@@ -334,11 +353,11 @@ Deno.serve(async (request) => {
       albums,
       generated_at: new Date().toISOString(),
       metadata_source: "musicbrainz",
-      popularity_source: "listenbrainz",
+      popularity_source: listenBrainzAvailable ? "listenbrainz" : "pending",
     };
     const { data, error } = await supabase.rpc("import_external_card_catalog", { p_payload: payload });
     if (error) throw new Error(`database_import_failed:${error.message}`);
-    if (appleMusicToken && appleMusicMatches > 0) {
+    if (appleMusicAvailable && appleMusicMatches > 0) {
       const rankedRows = albums.flatMap((album) => album.tracks)
         .filter((track) => track.apple_music_rank != null)
         .map((track) => ({
@@ -359,12 +378,15 @@ Deno.serve(async (request) => {
     return jsonResponse({
       ...result,
       success: true,
-      apple_music_enabled: Boolean(appleMusicToken),
+      listenbrainz_available: listenBrainzAvailable,
+      apple_music_enabled: appleMusicAvailable,
       apple_music_matches: appleMusicMatches,
       apple_music_storefront: appleMusicStorefront,
-      message: appleMusicToken
+      message: appleMusicAvailable
         ? `${baseMessage} Apple Music: ${appleMusicMatches} músicas ranqueadas.`
-        : `${baseMessage} Apple Music ainda não configurado; usando popularidade global.`,
+        : listenBrainzAvailable
+          ? `${baseMessage} Popularidade global atualizada.`
+          : `${baseMessage} As métricas de popularidade serão atualizadas na próxima sincronização.`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";

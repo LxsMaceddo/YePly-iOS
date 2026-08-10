@@ -58,7 +58,11 @@ struct CoverArtwork: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
         }
-        .aspectRatio(1, contentMode: .fit)
+        // The aspect ratio belongs to the caller. Keeping this placeholder
+        // flexible is important for compact rows (Admin/Discovery); otherwise
+        // its intrinsic 130 pt decoration can render outside a 58 pt frame.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(.white.opacity(0.08)))
     }
