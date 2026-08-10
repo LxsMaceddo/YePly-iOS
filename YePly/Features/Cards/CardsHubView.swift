@@ -548,54 +548,7 @@ struct CardProfileShowcaseView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                profileSummary
-                sectionTitle("Badges de álbuns", detail: "Escolha até três posições no seu perfil")
-                if completedAlbums.isEmpty {
-                    ContentUnavailableView("Nenhuma badge ainda", systemImage: "seal", description: Text("Complete todas as cartas de um álbum para liberar a badge."))
-                        .frame(maxWidth: .infinity)
-                } else {
-                    LazyVStack(spacing: 11) {
-                        ForEach(completedAlbums) { album in
-                            HStack(spacing: 13) {
-                                Image(systemName: album.badgeEquipped ? "checkmark.seal.fill" : "seal.fill")
-                                    .font(.title2).foregroundStyle(album.badgeEquipped ? .green : YePlyTheme.accent)
-                                    .frame(width: 42, height: 42).background(YePlyTheme.surface, in: Circle())
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(album.albumTitle).font(.headline)
-                                    Text("\(album.totalCards) cartas · \(album.artistName)").font(.caption).foregroundStyle(YePlyTheme.secondary)
-                                }
-                                Spacer()
-                                Menu {
-                                    ForEach(1...3, id: \.self) { slot in
-                                        Button("Posição \(slot)") { Task { await model.equip(album, slot: slot, repository: container.repository) } }
-                                    }
-                                } label: {
-                                    Text(album.badgeEquipped ? "Alterar" : "Equipar").font(.caption.bold())
-                                }
-                            }
-                            .padding(14).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17))
-                        }
-                    }
-                }
-
-                sectionTitle("Conquistas", detail: "\(unlockedAchievements.count) de \(model.achievements.count) liberadas")
-                LazyVStack(spacing: 10) {
-                    ForEach(model.achievements) { achievement in
-                        HStack(spacing: 12) {
-                            Image(systemName: achievement.symbolName).font(.title3)
-                                .foregroundStyle(achievement.isUnlocked ? YePlyTheme.accent : YePlyTheme.tertiary)
-                                .frame(width: 36, height: 36).background(YePlyTheme.surface, in: Circle())
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack { Text(achievement.title).font(.subheadline.bold()); Spacer(); Text("\(min(achievement.progress, achievement.target))/\(achievement.target)").font(.caption2).foregroundStyle(YePlyTheme.tertiary) }
-                                ProgressView(value: achievement.completion).tint(achievement.isUnlocked ? .green : YePlyTheme.accent)
-                            }
-                        }
-                        .padding(13).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16))
-                    }
-                }
-            }
-            .padding(18).padding(.bottom, 90)
+            showcaseContent
         }
         .navigationTitle("Badges e conquistas")
         .navigationBarTitleDisplayMode(.inline)
@@ -606,6 +559,51 @@ struct CardProfileShowcaseView: View {
             Button("OK", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
         .yeplyBackground()
+    }
+
+    private var showcaseContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            profileSummary
+            albumBadgesSection
+            achievementsSection
+        }
+        .padding(18)
+        .padding(.bottom, 90)
+    }
+
+    @ViewBuilder
+    private var albumBadgesSection: some View {
+        sectionTitle("Badges de álbuns", detail: "Escolha até três posições no seu perfil")
+        if completedAlbums.isEmpty {
+            ContentUnavailableView(
+                "Nenhuma badge ainda",
+                systemImage: "seal",
+                description: Text("Complete todas as cartas de um álbum para liberar a badge.")
+            )
+            .frame(maxWidth: .infinity)
+        } else {
+            LazyVStack(spacing: 11) {
+                ForEach(completedAlbums) { album in
+                    CardAlbumBadgeRow(album: album) { slot in
+                        Task { await model.equip(album, slot: slot, repository: container.repository) }
+                    }
+                }
+            }
+        }
+    }
+
+    private var achievementsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle(
+                "Conquistas",
+                detail: "\(unlockedAchievements.count) de \(model.achievements.count) liberadas"
+            )
+            LazyVStack(spacing: 10) {
+                ForEach(model.achievements) { achievement in
+                    CardAchievementProgressRow(achievement: achievement)
+                }
+            }
+        }
     }
 
     private var profileSummary: some View {
@@ -630,6 +628,69 @@ struct CardProfileShowcaseView: View {
             Text(title).font(.title3.bold())
             Text(detail).font(.caption).foregroundStyle(YePlyTheme.secondary)
         }
+    }
+}
+
+private struct CardAlbumBadgeRow: View {
+    let album: CardAlbumProgress
+    let onEquip: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 13) {
+            badgeIcon
+            VStack(alignment: .leading, spacing: 3) {
+                Text(album.albumTitle).font(.headline)
+                Text("\(album.totalCards) cartas · \(album.artistName)")
+                    .font(.caption)
+                    .foregroundStyle(YePlyTheme.secondary)
+            }
+            Spacer()
+            Menu {
+                ForEach(1...3, id: \.self) { slot in
+                    Button("Posição \(slot)") { onEquip(slot) }
+                }
+            } label: {
+                Text(album.badgeEquipped ? "Alterar" : "Equipar")
+                    .font(.caption.bold())
+            }
+        }
+        .padding(14)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17))
+    }
+
+    private var badgeIcon: some View {
+        Image(systemName: album.badgeEquipped ? "checkmark.seal.fill" : "seal.fill")
+            .font(.title2)
+            .foregroundStyle(album.badgeEquipped ? Color.green : YePlyTheme.accent)
+            .frame(width: 42, height: 42)
+            .background(YePlyTheme.surface, in: Circle())
+    }
+}
+
+private struct CardAchievementProgressRow: View {
+    let achievement: CardAchievement
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: achievement.symbolName)
+                .font(.title3)
+                .foregroundStyle(achievement.isUnlocked ? YePlyTheme.accent : YePlyTheme.tertiary)
+                .frame(width: 36, height: 36)
+                .background(YePlyTheme.surface, in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(achievement.title).font(.subheadline.bold())
+                    Spacer()
+                    Text("\(min(achievement.progress, achievement.target))/\(achievement.target)")
+                        .font(.caption2)
+                        .foregroundStyle(YePlyTheme.tertiary)
+                }
+                ProgressView(value: achievement.completion)
+                    .tint(achievement.isUnlocked ? Color.green : YePlyTheme.accent)
+            }
+        }
+        .padding(13)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
