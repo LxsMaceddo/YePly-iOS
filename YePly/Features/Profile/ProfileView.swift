@@ -234,23 +234,54 @@ struct ProfileView: View {
         guard !isRefreshingProfile else { return }
         isRefreshingProfile = true
         defer { isRefreshingProfile = false }
-        async let profileRequest = container.repository.fetchProfile(id: id)
-        async let equippedRequest = container.repository.fetchEquippedCardBadges(profileID: id)
-        async let ownedRequest = container.repository.fetchOwnedProfileBadges(profileID: id)
-        async let featuredRequest = container.repository.fetchFeaturedProfileCard(profileID: id)
-        async let collectorRequest = container.repository.fetchCollectorProfile(profileID: id)
-        async let wishlistRequest = container.repository.fetchUserWishlist(username: session.profile?.username ?? "")
-        async let foldersRequest = container.repository.fetchCardFolders(profileID: id)
-        async let marketRequest = container.repository.fetchPublicCardOffers(profileID: id)
-        socialProfile = try? await profileRequest
-        equippedBadges = (try? await equippedRequest) ?? equippedBadges
-        let loadedBadges = (try? await ownedRequest) ?? []
-        ownedBadgeCount = socialProfile?.ownedBadgeCount ?? loadedBadges.count
-        featuredCard = try? await featuredRequest
-        collector = try? await collectorRequest
-        wishlist = (try? await wishlistRequest) ?? []
-        folders = (try? await foldersRequest) ?? []
-        marketOffers = (try? await marketRequest) ?? []
+
+        // These feeds can be large for established collectors. Running all of
+        // them at once creates a short but very high memory peak while JSON and
+        // artwork paths are decoded, which can make iOS terminate the app on
+        // entry. Load progressively so the profile becomes usable immediately
+        // and each response is released before the next one starts.
+        socialProfile = try? await container.repository.fetchProfile(id: id)
+        await Task.yield()
+
+        do {
+            let badges = try await container.repository.fetchEquippedCardBadges(profileID: id)
+            equippedBadges = Array(badges.sorted { $0.slot < $1.slot }.prefix(4))
+        } catch {}
+        await Task.yield()
+
+        if let count = socialProfile?.ownedBadgeCount {
+            ownedBadgeCount = count
+        } else {
+            do {
+                let badges = try await container.repository.fetchOwnedProfileBadges(profileID: id)
+                ownedBadgeCount = badges.count
+            } catch {}
+        }
+        await Task.yield()
+
+        featuredCard = try? await container.repository.fetchFeaturedProfileCard(profileID: id)
+        await Task.yield()
+        collector = try? await container.repository.fetchCollectorProfile(profileID: id)
+        await Task.yield()
+
+        if let username = session.profile?.username, !username.isEmpty {
+            do {
+                let loadedWishlist = try await container.repository.fetchUserWishlist(username: username)
+                wishlist = Array(loadedWishlist.prefix(40))
+            } catch {}
+        }
+        await Task.yield()
+
+        do {
+            let loadedFolders = try await container.repository.fetchCardFolders(profileID: id)
+            folders = Array(loadedFolders.prefix(40))
+        } catch {}
+        await Task.yield()
+
+        do {
+            let loadedOffers = try await container.repository.fetchPublicCardOffers(profileID: id)
+            marketOffers = Array(loadedOffers.prefix(40))
+        } catch {}
     }
 }
 
@@ -367,67 +398,44 @@ struct ProfileMediaImage: View {
 
     var body: some View {
         Group {
-            if let image { AnimatedProfileUIImageView(image: image) }
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            }
             else { Color.clear.overlay(ProgressView().tint(.white.opacity(0.7))) }
         }
         .task(id: url) {
-            let data: Data?
-            if url.isFileURL { data = try? Data(contentsOf: url) }
-            else { data = try? await URLSession.shared.data(from: url).0 }
-            guard let data else { return }
-            image = Self.decode(data)
+            let sourceURL: URL
+            if url.isFileURL {
+                sourceURL = url
+            } else {
+                do {
+                    sourceURL = try await URLSession.shared.download(from: url).0
+                } catch {
+                    return
+                }
+            }
+            image = Self.decodeFirstFrame(at: sourceURL)
         }
     }
 
-    private static func decode(_ data: Data) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(
-            data as CFData,
+    private static func decodeFirstFrame(at url: URL) -> UIImage? {
+        guard let source = CGImageSourceCreateWithURL(
+            url as CFURL,
             [kCGImageSourceShouldCache: false] as CFDictionary
         ) else { return nil }
 
-        let maximumPixelSize = data.isGIF ? 720 : 1_440
         let thumbnailOptions: CFDictionary = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+            kCGImageSourceThumbnailMaxPixelSize: 1_440,
             kCGImageSourceShouldCacheImmediately: true
         ] as CFDictionary
 
-        guard data.isGIF else {
-            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else { return nil }
-            return UIImage(cgImage: thumbnail)
-        }
-
-        let sourceFrameCount = CGImageSourceGetCount(source)
-        guard sourceFrameCount > 0 else { return nil }
-
-        // A GIF de perfil pode ter centenas de quadros em resolucao alta. Manter
-        // todos eles descompactados fecha o app por pressao de memoria. Amostramos
-        // no maximo 24 quadros ja redimensionados, preservando a animacao sem
-        // ultrapassar o orcamento de memoria de iPhones com pouca RAM.
-        let maximumFrames = 24
-        let frameStep = max(1, Int(ceil(Double(sourceFrameCount) / Double(maximumFrames))))
-        var images: [UIImage] = []
-        var duration = 0.0
-        images.reserveCapacity(min(sourceFrameCount, maximumFrames))
-        for index in stride(from: 0, to: sourceFrameCount, by: frameStep) {
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, index, thumbnailOptions) else { continue }
-            images.append(UIImage(cgImage: cgImage))
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
-            let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-            let frameDelay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double)
-                ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double)
-                ?? 0.1
-            duration += max(0.02, frameDelay) * Double(frameStep)
-        }
-        return images.count > 1 ? UIImage.animatedImage(with: images, duration: max(duration, 0.1)) : images.first
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else { return nil }
+        return UIImage(cgImage: thumbnail)
     }
-}
-
-private struct AnimatedProfileUIImageView: UIViewRepresentable {
-    let image: UIImage
-    func makeUIView(context: Context) -> UIImageView { let view = UIImageView(); view.contentMode = .scaleAspectFill; view.clipsToBounds = true; return view }
-    func updateUIView(_ view: UIImageView, context: Context) { if view.image !== image { view.image = image; view.startAnimating() } }
 }
 
 private struct ProfileAvatarView: View {
