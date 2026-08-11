@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
+    @EnvironmentObject private var notifications: YePlyNotificationStore
 
     var body: some View {
         Group {
@@ -25,6 +26,7 @@ struct MainTabView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var links: DeepLinkRouter
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
+    @EnvironmentObject private var notifications: YePlyNotificationStore
     @State private var selection = 0
     @State private var showingNowPlaying = false
     @State private var isMiniPlayerHidden = false
@@ -41,11 +43,9 @@ struct MainTabView: View {
             NavigationStack { DiscoveryView() }
                 .tabItem { Label("Descobrir", systemImage: "magnifyingglass") }
                 .tag(2)
-            if session.isAdmin {
-                NavigationStack { AdminDashboardView() }
-                    .tabItem { Label("Admin", systemImage: "slider.horizontal.3") }
-                    .tag(3)
-            }
+            NavigationStack { CardsHubView() }
+                .tabItem { Label("Cartas", systemImage: "rectangle.stack.fill") }
+                .tag(3)
             NavigationStack { ProfileView() }
                 .tabItem { Label("Perfil", systemImage: "person.crop.circle") }
                 .tag(4)
@@ -66,10 +66,29 @@ struct MainTabView: View {
             }
         }
         .overlay(alignment: .bottom) { playerOverlay }
+        .overlay(alignment: .top) {
+            VStack(spacing: 8) {
+                if let notification = notifications.toast {
+                    NotificationToast(notification: notification, onOpen: notifications.openCenter, onDismiss: notifications.dismissToast)
+                        .padding(.horizontal, 12).transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if let message = player.cardRewardMessage {
+                    Label(message, systemImage: "rectangle.stack.fill")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .onTapGesture { player.cardRewardMessage = nil }
+                        .task(id: message) { try? await Task.sleep(for: .seconds(5)); player.cardRewardMessage = nil }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .safeAreaPadding(.top, 8)
+        }
         .onChange(of: player.currentTrack?.id) { oldTrackID, newTrackID in
             if oldTrackID != newTrackID { withAnimation(.snappy) { isMiniPlayerHidden = false } }
         }
         .fullScreenCover(isPresented: $showingNowPlaying) { NowPlayingView() }
+        .sheet(isPresented: $notifications.showingCenter) { NotificationCenterView() }
         .sheet(isPresented: Binding(get: { links.pendingShareToken != nil }, set: { if !$0 { links.clearShare() } })) {
             if let token = links.pendingShareToken { SharedPlaylistImportView(token: token) }
         }
@@ -77,7 +96,15 @@ struct MainTabView: View {
             Button("OK", role: .cancel) {}
         } message: { Text(player.errorMessage ?? "") }
         .yeplyBackground()
+        .task(id: notificationMonitorKey) {
+            guard session.userID != nil, offlineLibrary.isConnected else { return }
+            await notifications.monitor(repository: containerRepository)
+        }
     }
+
+    @EnvironmentObject private var container: AppContainer
+    private var containerRepository: any MusicRepository { container.repository }
+    private var notificationMonitorKey: String { "\(session.userID?.uuidString ?? "none")-\(offlineLibrary.isConnected)" }
 
     @ViewBuilder
     private var playerOverlay: some View {
@@ -100,7 +127,7 @@ struct MainTabView: View {
                     MiniPlayerView { showingNowPlaying = true }
                         .offset(y: miniPlayerDragOffset)
                         .opacity(1 - Double(min(miniPlayerDragOffset / 180, 0.55)))
-                        .simultaneousGesture(miniPlayerDismissGesture)
+                        .highPriorityGesture(miniPlayerDismissGesture)
                         .accessibilityHint("Deslize para baixo para esconder o player")
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -116,7 +143,7 @@ struct MainTabView: View {
                 offset = max(0, value.translation.height)
             }
             .onEnded { value in
-                guard value.translation.height > 45 || value.predictedEndTranslation.height > 100 else { return }
+                guard value.translation.height > 58 || value.predictedEndTranslation.height > 130 else { return }
                 withAnimation(.snappy) { isMiniPlayerHidden = true }
             }
     }

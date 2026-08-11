@@ -7,10 +7,12 @@ final class AppContainer: ObservableObject {
     let player: AudioPlayer
     let links: DeepLinkRouter
     let offlineLibrary: OfflineLibraryStore
+    let notifications: YePlyNotificationStore
     let isDemoBackend: Bool
 
     init() {
         offlineLibrary = OfflineLibraryStore()
+        notifications = YePlyNotificationStore()
         if let client = SupabaseProvider.client {
             session = SessionStore(client: client)
             repository = SupabaseMusicRepository(client: client)

@@ -10,6 +10,7 @@ final class PlaylistDetailViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do { tracks = try await repository.fetchTracks(playlistID: playlistID); errorMessage = nil }
+        catch let error where error.isYePlyCancellation { return }
         catch { errorMessage = error.localizedDescription }
     }
 
@@ -50,6 +51,7 @@ struct PlaylistDetailView: View {
     @State private var playlistFollowerCount: Int
     @State private var playlistViewCount: Int
     @State private var didRecordView = false
+    @State private var isArtistVerified = false
     let playlist: Playlist
 
     private var canManage: Bool { playlist.ownerId == session.userID || session.isAdmin }
@@ -68,7 +70,10 @@ struct PlaylistDetailView: View {
                     PlaylistArtworkView(playlist: playlist).frame(maxWidth: 310).shadow(color: .black.opacity(0.4), radius: 26, y: 16)
                     VStack(spacing: 7) {
                         Text(playlist.title).font(.system(size: 29, weight: .bold, design: .rounded)).multilineTextAlignment(.center)
-                        Text(playlist.artistName).font(.subheadline).foregroundStyle(YePlyTheme.secondary)
+                        HStack(spacing: 5) {
+                            Text(playlist.artistName).font(.subheadline).foregroundStyle(YePlyTheme.secondary)
+                            if isArtistVerified { VerifiedArtistBadge() }
+                        }
                         if let summary = playlist.summary { Text(summary).font(.footnote).foregroundStyle(YePlyTheme.secondary).multilineTextAlignment(.center).padding(.top, 3) }
                         HStack(spacing: 14) {
                             Label("\(playlistViewCount)", systemImage: "eye.fill")
@@ -174,6 +179,9 @@ struct PlaylistDetailView: View {
                                 onAddToQueue: {
                                     player.addToQueue(track, repository: container.repository, artworkPath: playlist.coverPath, collectionTitle: playlist.title)
                                 },
+                                onOfflineDownload: {
+                                    Task { await offlineLibrary.downloadTrack(track, in: playlist, repository: container.repository) }
+                                },
                                 onDownload: {
                                     Task { await downloadManager.prepare(track: track, repository: container.repository, localURL: offlineLibrary.localAudioURL(for: track)) }
                                 },
@@ -200,6 +208,11 @@ struct PlaylistDetailView: View {
         .sheet(item: $downloadManager.exportedFile) { file in ActivityShareSheet(items: [file.url]) }
         .task(id: detailLoadKey) { await loadTracks() }
         .task(id: playlist.id) { await recordView() }
+        .task(id: playlist.artistName) {
+            guard offlineLibrary.isConnected else { return }
+            let artists = try? await container.repository.searchArtists(query: playlist.artistName)
+            isArtistVerified = artists?.first(where: { $0.artistName.localizedCaseInsensitiveCompare(playlist.artistName) == .orderedSame })?.isVerified ?? false
+        }
         .alert("Não foi possível concluir", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
         .alert("Não foi possível baixar", isPresented: Binding(get: { downloadManager.errorMessage != nil }, set: { if !$0 { downloadManager.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(downloadManager.errorMessage ?? "") }
         .alert("Download offline", isPresented: Binding(get: { offlineLibrary.errorMessage != nil }, set: { if !$0 { offlineLibrary.errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(offlineLibrary.errorMessage ?? "") }
@@ -291,6 +304,7 @@ private struct TrackRow: View {
     let onPlay: () -> Void
     let onPlayNext: () -> Void
     let onAddToQueue: () -> Void
+    let onOfflineDownload: () -> Void
     let onDownload: () -> Void
     let onInformation: () -> Void
     let onLike: () -> Void
@@ -331,12 +345,18 @@ private struct TrackRow: View {
                 Button("Tocar a seguir", systemImage: "text.line.first.and.arrowtriangle.forward", action: onPlayNext)
                 Button("Adicionar ao final da fila", systemImage: "text.badge.plus", action: onAddToQueue)
                 Divider()
+                if isAvailableOffline {
+                    Label("Disponível para ouvir offline", systemImage: "checkmark.circle.fill")
+                } else {
+                    Button("Baixar para ouvir offline", systemImage: "arrow.down.to.line", action: onOfflineDownload)
+                        .disabled(!canUseSocial)
+                }
                 Button(track.isLiked == true ? "Remover curtida" : "Curtir música", systemImage: track.isLiked == true ? "heart.slash" : "heart", action: onLike)
                     .disabled(!canUseSocial)
                 Button("Comentários (\(track.commentCount ?? 0))", systemImage: "bubble.left", action: onComments)
                     .disabled(!canUseSocial)
                 Divider()
-                Button("Baixar ou salvar MP3", systemImage: "arrow.down.circle", action: onDownload)
+                Button("Exportar arquivo MP3", systemImage: "square.and.arrow.down", action: onDownload)
                 Button("Informações da música", systemImage: "info.circle", action: onInformation)
                 if let onDelete {
                     Divider()

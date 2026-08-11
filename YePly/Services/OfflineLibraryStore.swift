@@ -54,7 +54,13 @@ final class OfflineLibraryStore: ObservableObject {
 
     var isOfflineMode: Bool { !isConnected }
 
-    var downloadedPlaylistCount: Int { visibleManifests.count }
+    var downloadedPlaylistCount: Int {
+        visibleManifests.values.filter { !playableTracks(in: $0).isEmpty }.count
+    }
+
+    var downloadedTrackCount: Int {
+        visibleManifests.values.reduce(0) { $0 + playableTracks(in: $1).count }
+    }
 
     var downloadedSizeBytes: Int64 {
         visibleManifests.values.reduce(0) { result, manifest in
@@ -75,7 +81,13 @@ final class OfflineLibraryStore: ObservableObject {
 
     func playlists(for scope: LibraryScope) -> [Playlist] {
         guard let activeUserID else { return [] }
-        let values = visibleManifests.values.map(\.playlist)
+        let values = visibleManifests.values.compactMap { manifest -> Playlist? in
+            let tracks = playableTracks(in: manifest)
+            guard !tracks.isEmpty else { return nil }
+            var playlist = manifest.playlist
+            playlist.trackCount = tracks.count
+            return playlist
+        }
         switch scope {
         case .all: return values
         case .mine: return values.filter { $0.ownerId == activeUserID }
@@ -84,17 +96,22 @@ final class OfflineLibraryStore: ObservableObject {
     }
 
     func tracks(for playlistID: UUID) -> [Track]? {
-        visibleManifests[playlistID]?.tracks.sorted { $0.position < $1.position }
+        guard let manifest = visibleManifests[playlistID] else { return nil }
+        let tracks = playableTracks(in: manifest)
+        return tracks.isEmpty ? nil : tracks
     }
 
     func state(for playlistID: UUID) -> OfflinePlaylistState {
         if let progress = progressByPlaylist[playlistID] { return .downloading(progress) }
-        if visibleManifests[playlistID] != nil { return .downloaded }
+        if let manifest = visibleManifests[playlistID], !playableTracks(in: manifest).isEmpty { return .downloaded }
         if let failure = failuresByPlaylist[playlistID] { return .failed(failure) }
         return .notDownloaded
     }
 
-    func isPlaylistDownloaded(_ playlistID: UUID) -> Bool { visibleManifests[playlistID] != nil }
+    func isPlaylistDownloaded(_ playlistID: UUID) -> Bool {
+        guard let manifest = visibleManifests[playlistID] else { return false }
+        return !playableTracks(in: manifest).isEmpty
+    }
 
     func isTrackDownloaded(_ track: Track) -> Bool { localAudioURL(for: track) != nil }
 
@@ -133,11 +150,7 @@ final class OfflineLibraryStore: ObservableObject {
             var completedSteps = 0
 
             for track in tracks.sorted(by: { $0.position < $1.position }) {
-                let remoteURL = try await repository.signedAudioURL(for: track)
-                let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
-                try validate(response)
-                let filename = "\(track.id.uuidString.lowercased()).mp3"
-                try fileManager.moveItem(at: temporaryURL, to: stagingDirectory.appendingPathComponent(filename))
+                let filename = try await downloadAudioFile(for: track, to: stagingDirectory, repository: repository)
                 audioFiles[track.id.uuidString.lowercased()] = filename
                 completedSteps += 1
                 progressByPlaylist[playlist.id] = Double(completedSteps) / Double(totalSteps)
@@ -146,12 +159,9 @@ final class OfflineLibraryStore: ObservableObject {
 
             var coverFileName: String?
             if let coverPath = playlist.coverPath {
-                let remoteURL = try await repository.signedCoverURL(path: coverPath)
-                let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
-                try validate(response)
-                let filename = "cover.jpg"
-                try fileManager.moveItem(at: temporaryURL, to: stagingDirectory.appendingPathComponent(filename))
-                coverFileName = filename
+                // Artwork is optional: a temporary cover failure must never
+                // discard audio files that were downloaded successfully.
+                coverFileName = try? await downloadCoverFile(path: coverPath, to: stagingDirectory, repository: repository)
                 completedSteps += 1
                 progressByPlaylist[playlist.id] = Double(completedSteps) / Double(totalSteps)
             }
@@ -170,13 +180,67 @@ final class OfflineLibraryStore: ObservableObject {
             let destination = playlistDirectory(userID: userID, playlistID: playlist.id)
             if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
             try fileManager.moveItem(at: stagingDirectory, to: destination)
-            try? fileManager.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
+            protectOfflineFiles(in: destination)
             excludeFromBackup(destination)
             manifests[manifestKey(userID: userID, playlistID: playlist.id)] = manifest
             progressByPlaylist[playlist.id] = nil
             revision += 1
         } catch {
             try? fileManager.removeItem(at: stagingDirectory)
+            progressByPlaylist[playlist.id] = nil
+            let message = error.localizedDescription
+            failuresByPlaylist[playlist.id] = message
+            errorMessage = message
+            revision += 1
+        }
+    }
+
+    func downloadTrack(_ track: Track, in playlist: Playlist, repository: any MusicRepository) async {
+        guard let userID = activeUserID else { errorMessage = YePlyError.noActiveUser.localizedDescription; return }
+        guard isConnected else { errorMessage = "Conecte-se à internet para iniciar o download."; return }
+        guard progressByPlaylist[playlist.id] == nil else { return }
+        if isTrackDownloaded(track) { return }
+
+        errorMessage = nil
+        failuresByPlaylist[playlist.id] = nil
+        progressByPlaylist[playlist.id] = 0
+        revision += 1
+
+        let directory = playlistDirectory(userID: userID, playlistID: playlist.id)
+        let key = manifestKey(userID: userID, playlistID: playlist.id)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            var audioFiles = manifests[key]?.audioFiles ?? [:]
+            let filename = try await downloadAudioFile(for: track, to: directory, repository: repository)
+            audioFiles[track.id.uuidString.lowercased()] = filename
+            progressByPlaylist[playlist.id] = 0.82
+            revision += 1
+
+            var coverFileName = manifests[key]?.coverFileName
+            if coverFileName == nil, let coverPath = playlist.coverPath {
+                coverFileName = try? await downloadCoverFile(path: coverPath, to: directory, repository: repository)
+            }
+
+            var savedTracks = manifests[key]?.tracks ?? []
+            savedTracks.removeAll { $0.id == track.id }
+            savedTracks.append(track)
+            savedTracks.sort { $0.position < $1.position }
+
+            let manifest = OfflinePlaylistManifest(
+                userID: userID,
+                playlist: playlist,
+                tracks: savedTracks,
+                audioFiles: audioFiles,
+                coverFileName: coverFileName,
+                downloadedAt: .now
+            )
+            try writeManifest(manifest, in: directory)
+            protectOfflineFiles(in: directory)
+            excludeFromBackup(directory)
+            manifests[key] = manifest
+            progressByPlaylist[playlist.id] = nil
+            revision += 1
+        } catch {
             progressByPlaylist[playlist.id] = nil
             let message = error.localizedDescription
             failuresByPlaylist[playlist.id] = message
@@ -209,6 +273,83 @@ final class OfflineLibraryStore: ObservableObject {
         rootDirectory
             .appendingPathComponent(userID.uuidString.lowercased(), isDirectory: true)
             .appendingPathComponent(playlistID.uuidString.lowercased(), isDirectory: true)
+    }
+
+    private func playableTracks(in manifest: OfflinePlaylistManifest) -> [Track] {
+        manifest.tracks
+            .filter { track in
+                guard let filename = manifest.audioFiles[track.id.uuidString.lowercased()] else { return false }
+                let url = playlistDirectory(userID: manifest.userID, playlistID: manifest.playlist.id).appendingPathComponent(filename)
+                guard fileManager.fileExists(atPath: url.path),
+                      let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+                      (values.fileSize ?? 0) > 1_024
+                else { return false }
+                return true
+            }
+            .sorted { $0.position < $1.position }
+    }
+
+    private func downloadAudioFile(for track: Track, to directory: URL, repository: any MusicRepository) async throws -> String {
+        let remoteURL = try await repository.signedAudioURL(for: track)
+        let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+        do {
+            try validate(response)
+            let values = try temporaryURL.resourceValues(forKeys: [.fileSizeKey])
+            guard (values.fileSize ?? 0) > 1_024 else {
+                throw YePlyError.message("O arquivo de áudio recebido está vazio ou incompleto.")
+            }
+            let filename = offlineAudioFileName(for: track)
+            let destination = directory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
+            try fileManager.moveItem(at: temporaryURL, to: destination)
+            protectOfflineFile(destination)
+            return filename
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
+    private func downloadCoverFile(path: String, to directory: URL, repository: any MusicRepository) async throws -> String {
+        let remoteURL = try await repository.signedCoverURL(path: path)
+        let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+        do {
+            try validate(response)
+            let filename = "cover.jpg"
+            let destination = directory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
+            try fileManager.moveItem(at: temporaryURL, to: destination)
+            protectOfflineFile(destination)
+            return filename
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
+    private func offlineAudioFileName(for track: Track) -> String {
+        let candidate = URL(fileURLWithPath: track.audioPath).pathExtension.lowercased()
+        let supported = Set(["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac"])
+        let fileExtension = supported.contains(candidate) ? candidate : "mp3"
+        return "\(track.id.uuidString.lowercased()).\(fileExtension)"
+    }
+
+    private func writeManifest(_ manifest: OfflinePlaylistManifest, in directory: URL) throws {
+        let data = try JSONEncoder.yeply.encode(manifest)
+        try data.write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
+    }
+
+    private func protectOfflineFile(_ url: URL) {
+        try? fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: url.path
+        )
+    }
+
+    private func protectOfflineFiles(in directory: URL) {
+        protectOfflineFile(directory)
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: nil) else { return }
+        for case let url as URL in enumerator { protectOfflineFile(url) }
     }
 
     private func loadManifests() {

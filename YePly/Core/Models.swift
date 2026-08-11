@@ -1,5 +1,15 @@
 import Foundation
 
+extension Error {
+    var isYePlyCancellation: Bool {
+        if self is CancellationError { return true }
+        let nsError = self as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return true }
+        let message = nsError.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return message == "cancelled" || message == "canceled" || message == "cancelado"
+    }
+}
+
 enum UserRole: String, Codable, Sendable {
     case listener
     case creator
@@ -11,6 +21,7 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
     var displayName: String
     var username: String
     var avatarPath: String?
+    var backgroundPath: String? = nil
     var bio: String?
     var tastes: [String]?
     var role: UserRole
@@ -18,12 +29,15 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
     var followerCount: Int? = nil
     var followingCount: Int? = nil
     var isFollowed: Bool? = nil
+    var ownedBadgeCount: Int? = nil
+    var residenceCountryCode: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
         case username
         case avatarPath = "avatar_path"
+        case backgroundPath = "background_path"
         case bio
         case tastes
         case role
@@ -31,6 +45,8 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
         case followerCount = "follower_count"
         case followingCount = "following_count"
         case isFollowed = "is_followed"
+        case ownedBadgeCount = "owned_badge_count"
+        case residenceCountryCode = "residence_country_code"
     }
 }
 
@@ -105,6 +121,7 @@ struct Track: Codable, Identifiable, Hashable, Sendable {
     var position: Int
     var fileSizeBytes: Int64?
     var createdAt: Date?
+    var waveformSamples: [Double]? = nil
     var likeCount: Int? = nil
     var commentCount: Int? = nil
     var isLiked: Bool? = nil
@@ -122,6 +139,7 @@ struct Track: Codable, Identifiable, Hashable, Sendable {
         case position
         case fileSizeBytes = "file_size_bytes"
         case createdAt = "created_at"
+        case waveformSamples = "waveform_samples"
         case likeCount = "like_count"
         case commentCount = "comment_count"
         case isLiked = "is_liked"
@@ -140,6 +158,7 @@ struct ArtistSummary: Codable, Identifiable, Hashable, Sendable {
     let trackCount: Int
     var followerCount: Int
     var isFollowed: Bool
+    var isVerified: Bool = false
 
     var id: String { artistKey }
 
@@ -150,6 +169,7 @@ struct ArtistSummary: Codable, Identifiable, Hashable, Sendable {
         case trackCount = "track_count"
         case followerCount = "follower_count"
         case isFollowed = "is_followed"
+        case isVerified = "is_verified"
     }
 }
 
@@ -158,6 +178,7 @@ struct TrackComment: Codable, Identifiable, Hashable, Sendable {
     let trackId: UUID
     let userId: UUID
     let body: String
+    let timestampSeconds: Double?
     let createdAt: Date
     let updatedAt: Date
     let displayName: String
@@ -171,6 +192,7 @@ struct TrackComment: Codable, Identifiable, Hashable, Sendable {
         case trackId = "track_id"
         case userId = "user_id"
         case body
+        case timestampSeconds = "timestamp_seconds"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case displayName = "display_name"
@@ -197,11 +219,13 @@ struct NewTrackComment: Encodable, Sendable {
     let trackId: UUID
     let userId: UUID
     let body: String
+    let timestampSeconds: Double?
 
     enum CodingKeys: String, CodingKey {
         case trackId = "track_id"
         case userId = "user_id"
         case body
+        case timestampSeconds = "timestamp_seconds"
     }
 }
 
@@ -248,6 +272,7 @@ struct NewTrack: Encodable, Sendable {
     let artworkPath: String?
     let position: Int
     let fileSizeBytes: Int64
+    let waveformSamples: [Double]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -261,6 +286,169 @@ struct NewTrack: Encodable, Sendable {
         case artworkPath = "artwork_path"
         case position
         case fileSizeBytes = "file_size_bytes"
+        case waveformSamples = "waveform_samples"
+    }
+}
+
+struct PlaybackHistoryItem: Codable, Identifiable, Hashable, Sendable {
+    let trackId: UUID
+    let playlistId: UUID
+    let uploaderId: UUID
+    let title: String
+    let artistName: String
+    let albumName: String?
+    let durationSeconds: Double
+    let audioPath: String
+    let artworkPath: String?
+    let position: Int
+    let fileSizeBytes: Int64?
+    let trackCreatedAt: Date?
+    let waveformSamples: [Double]?
+    let playlistTitle: String
+    let playlistCoverPath: String?
+    let lastPlayedAt: Date
+    let playCount: Int
+
+    var id: UUID { trackId }
+    var track: Track {
+        Track(
+            id: trackId, playlistId: playlistId, uploaderId: uploaderId, title: title,
+            artistName: artistName, albumName: albumName, durationSeconds: durationSeconds,
+            audioPath: audioPath, artworkPath: artworkPath, position: position,
+            fileSizeBytes: fileSizeBytes, createdAt: trackCreatedAt, waveformSamples: waveformSamples
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case trackId = "track_id"
+        case playlistId = "playlist_id"
+        case uploaderId = "uploader_id"
+        case title
+        case artistName = "artist_name"
+        case albumName = "album_name"
+        case durationSeconds = "duration_seconds"
+        case audioPath = "audio_path"
+        case artworkPath = "artwork_path"
+        case position
+        case fileSizeBytes = "file_size_bytes"
+        case trackCreatedAt = "track_created_at"
+        case waveformSamples = "waveform_samples"
+        case playlistTitle = "playlist_title"
+        case playlistCoverPath = "playlist_cover_path"
+        case lastPlayedAt = "last_played_at"
+        case playCount = "play_count"
+    }
+}
+
+struct PublicTrackRankingItem: Codable, Identifiable, Hashable, Sendable {
+    let trackId: UUID
+    let playlistId: UUID
+    let uploaderId: UUID
+    let title: String
+    let artistName: String
+    let albumName: String?
+    let durationSeconds: Double
+    let audioPath: String
+    let artworkPath: String?
+    let position: Int
+    let fileSizeBytes: Int64?
+    let trackCreatedAt: Date?
+    let waveformSamples: [Double]?
+    let playlistTitle: String
+    let playlistCoverPath: String?
+    let playCount: Int
+
+    var id: UUID { trackId }
+    var track: Track {
+        Track(
+            id: trackId, playlistId: playlistId, uploaderId: uploaderId, title: title,
+            artistName: artistName, albumName: albumName, durationSeconds: durationSeconds,
+            audioPath: audioPath, artworkPath: artworkPath ?? playlistCoverPath, position: position,
+            fileSizeBytes: fileSizeBytes, createdAt: trackCreatedAt, waveformSamples: waveformSamples
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case trackId = "track_id"
+        case playlistId = "playlist_id"
+        case uploaderId = "uploader_id"
+        case title
+        case artistName = "artist_name"
+        case albumName = "album_name"
+        case durationSeconds = "duration_seconds"
+        case audioPath = "audio_path"
+        case artworkPath = "artwork_path"
+        case position
+        case fileSizeBytes = "file_size_bytes"
+        case trackCreatedAt = "track_created_at"
+        case waveformSamples = "waveform_samples"
+        case playlistTitle = "playlist_title"
+        case playlistCoverPath = "playlist_cover_path"
+        case playCount = "play_count"
+    }
+}
+
+enum ArtistCreditParser {
+    static func names(from credit: String) -> [String] {
+        credit
+            .split(separator: ",", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func key(for artistName: String) -> String {
+        artistName
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .lowercased()
+    }
+}
+
+enum SocialNotificationKind: String, Codable, Sendable {
+    case newFollower = "new_follower"
+    case playlistFollow = "playlist_follow"
+    case trackLike = "track_like"
+    case trackComment = "track_comment"
+}
+
+struct SocialNotification: Codable, Identifiable, Hashable, Sendable {
+    let id: UUID
+    let kind: SocialNotificationKind
+    let actorId: UUID
+    let actorDisplayName: String
+    let actorUsername: String
+    let actorAvatarPath: String?
+    let playlistId: UUID?
+    let playlistTitle: String?
+    let trackId: UUID?
+    let trackTitle: String?
+    let commentId: UUID?
+    let createdAt: Date
+    let readAt: Date?
+
+    var isUnread: Bool { readAt == nil }
+    var message: String {
+        switch kind {
+        case .newFollower: "começou a seguir você"
+        case .playlistFollow: "seguiu a playlist \(playlistTitle ?? "")"
+        case .trackLike: "curtiu \(trackTitle ?? "sua música")"
+        case .trackComment: "comentou em \(trackTitle ?? "sua música")"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind
+        case actorId = "actor_id"
+        case actorDisplayName = "actor_display_name"
+        case actorUsername = "actor_username"
+        case actorAvatarPath = "actor_avatar_path"
+        case playlistId = "playlist_id"
+        case playlistTitle = "playlist_title"
+        case trackId = "track_id"
+        case trackTitle = "track_title"
+        case commentId = "comment_id"
+        case createdAt = "created_at"
+        case readAt = "read_at"
     }
 }
 

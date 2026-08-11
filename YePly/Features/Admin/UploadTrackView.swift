@@ -16,6 +16,7 @@ struct UploadTrackView: View {
     @State private var album = ""
     @State private var duration: Double = 0
     @State private var fileSize: Int64 = 0
+    @State private var waveformSamples: [Double]?
     @State private var showingImporter = false
     @State private var isUploading = false
     @State private var errorMessage: String?
@@ -30,6 +31,10 @@ struct UploadTrackView: View {
                             VStack(alignment: .leading, spacing: 3) { Text(fileURL?.lastPathComponent ?? "Escolher MP3"); Text(fileURL == nil ? "Até 200 MB" : ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)).font(.caption).foregroundStyle(.secondary) }
                             Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                         }
+                    }
+                    if waveformSamples != nil {
+                        Label("Forma de onda analisada", systemImage: "waveform.badge.checkmark")
+                            .font(.caption).foregroundStyle(YePlyTheme.accent)
                     }
                 }
                 Section("Informações") {
@@ -69,6 +74,7 @@ struct UploadTrackView: View {
                 let copyURL = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).mp3")
                 try FileManager.default.copyItem(at: url, to: copyURL)
                 fileURL = copyURL; fileSize = size; duration = loadedDuration.isFinite ? loadedDuration : 0
+                waveformSamples = await WaveformAnalyzer.samples(from: copyURL)
                 if title.isEmpty { title = url.deletingPathExtension().lastPathComponent }
                 if artist.isEmpty { artist = playlist.artistName }
                 if album.isEmpty { album = playlist.title }
@@ -81,7 +87,7 @@ struct UploadTrackView: View {
         isUploading = true
         Task {
             do {
-                _ = try await container.repository.uploadTrack(TrackUpload(fileURL: fileURL, title: title.trimmingCharacters(in: .whitespacesAndNewlines), artistName: artist.trimmingCharacters(in: .whitespacesAndNewlines), albumName: album.isEmpty ? nil : album, duration: duration, fileSize: fileSize), to: playlist, uploaderID: userID, position: nextPosition)
+                _ = try await container.repository.uploadTrack(TrackUpload(fileURL: fileURL, title: title.trimmingCharacters(in: .whitespacesAndNewlines), artistName: artist.trimmingCharacters(in: .whitespacesAndNewlines), albumName: album.isEmpty ? nil : album, duration: duration, fileSize: fileSize, waveformSamples: waveformSamples), to: playlist, uploaderID: userID, position: nextPosition)
                 try? FileManager.default.removeItem(at: fileURL)
                 onUploaded(); dismiss()
             } catch { errorMessage = error.localizedDescription }

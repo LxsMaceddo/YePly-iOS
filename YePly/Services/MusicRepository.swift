@@ -7,6 +7,7 @@ struct TrackUpload: Sendable {
     let albumName: String?
     let duration: Double
     let fileSize: Int64
+    let waveformSamples: [Double]?
 }
 
 protocol MusicRepository: Sendable {
@@ -29,15 +30,74 @@ protocol MusicRepository: Sendable {
     func searchArtists(query: String) async throws -> [ArtistSummary]
     func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist]
     func toggleArtistFollow(artistName: String) async throws -> Bool
+    func toggleArtistVerification(artistName: String) async throws -> Bool
     func searchPlaylists(query: String) async throws -> [Playlist]
     func togglePlaylistFollow(playlistID: UUID) async throws -> Bool
     func recordPlaylistView(playlistID: UUID) async throws -> Int
     func toggleTrackLike(trackID: UUID) async throws -> Bool
     func fetchTrackComments(trackID: UUID) async throws -> [TrackComment]
-    func addTrackComment(trackID: UUID, userID: UUID, body: String) async throws
+    func addTrackComment(trackID: UUID, userID: UUID, body: String, timestampSeconds: Double?) async throws
     func deleteTrackComment(commentID: UUID) async throws
     func toggleCommentLike(commentID: UUID) async throws -> Bool
     func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary
+    func recordPlayback(trackID: UUID, positionSeconds: Double) async throws
+    func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem]
+    func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem]
+    func searchPublicTracks(query: String, limit: Int) async throws -> [PublicTrackRankingItem]
+    func clearPlaybackHistory() async throws
+    func fetchNotifications() async throws -> [SocialNotification]
+    func markAllNotificationsRead() async throws
+    func fetchCardDashboard() async throws -> CardGameDashboard
+    func fetchCardInventory() async throws -> [CollectibleCardItem]
+    func fetchCardPacks() async throws -> [CardPackSummary]
+    func fetchCardAlbumProgress() async throws -> [CardAlbumProgress]
+    func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem]
+    func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge]
+    /// RPC contract: `profile_owned_badges(p_profile_id)` returns badge_id,
+    /// badge_kind, title, subtitle, artwork_path, emoji, slot and source_id.
+    func fetchOwnedProfileBadges(profileID: UUID) async throws -> [ProfileCollectibleBadge]
+    /// RPC contract: `profile_featured_card(p_profile_id)` returns zero or one
+    /// row using the same columns as `CollectibleCardItem`.
+    func fetchFeaturedProfileCard(profileID: UUID) async throws -> CollectibleCardItem?
+    func fetchCardAchievements() async throws -> [CardAchievement]
+    func fetchCardArtists() async throws -> [CardArtistOption]
+    func fetchCardTrades() async throws -> [CardTradeSummary]
+    func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem]
+    func fetchCardWishlist() async throws -> [CardWishlistItem]
+    func toggleCardWishlist(definitionID: UUID) async throws -> CardRewardResult
+    func fetchCardPackStore() async throws -> [CardPackStoreProduct]
+    func buyCardPack(product: CardPackProductKind) async throws -> CardRewardResult
+    func claimDailyCardReward() async throws -> CardRewardResult
+    func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID
+    func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult
+    func redeemPackCode(_ code: String) async throws -> CardRewardResult
+    func openCardPack(id: UUID) async throws -> [CollectibleCardItem]
+    func openAllCardPacks() async throws -> [CollectibleCardItem]
+    func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult
+    func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult
+    func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult
+    /// RPC contract: `set_profile_featured_card(p_instance_id)` accepts nil to
+    /// clear the featured song and rejects cards not owned by the caller.
+    func setFeaturedProfileCard(instanceID: UUID?) async throws -> CardRewardResult
+    func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID
+    func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult
+    func fetchTradeDetail(id: UUID) async throws -> [CardTradeDetailItem]
+    func toggleCardProtection(instanceID: UUID) async throws -> CardRewardResult
+    func fetchCardFolders(profileID: UUID?) async throws -> [CardFolder]
+    func createCardFolder(name: String, emoji: String, isPublic: Bool) async throws -> UUID
+    func deleteCardFolder(id: UUID) async throws -> Bool
+    func toggleCardFolderItem(folderID: UUID, instanceID: UUID) async throws -> CardRewardResult
+    func fetchUserWishlist(username: String) async throws -> [CardWishlistItem]
+    func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary?
+    func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence?
+    func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws
+    func fetchPublicCardOffers(profileID: UUID?) async throws -> [CardPublicOffer]
+    func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult
+    func buyPublicCardOffer(id: UUID) async throws -> CardMarketPurchaseResult
+    func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult
+    func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult
+    func refreshCardRarities() async throws -> CardRewardResult
 }
 
 actor DemoMusicRepository: MusicRepository {
@@ -47,6 +107,8 @@ actor DemoMusicRepository: MusicRepository {
     private var followedArtists: Set<String> = []
     private var likedTracks: Set<UUID> = []
     private var commentsByTrack: [UUID: [TrackComment]] = [:]
+    private var verifiedArtists: Set<String> = ["yeply sessions"]
+    private var history: [PlaybackHistoryItem] = []
     private let demoUserID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
 
     init() {
@@ -103,7 +165,7 @@ actor DemoMusicRepository: MusicRepository {
     }
 
     func uploadTrack(_ upload: TrackUpload, to playlist: Playlist, uploaderID: UUID, position: Int) async throws -> Track {
-        let track = Track(id: UUID(), playlistId: playlist.id, uploaderId: uploaderID, title: upload.title, artistName: upload.artistName, albumName: upload.albumName, durationSeconds: upload.duration, audioPath: upload.fileURL.lastPathComponent, artworkPath: nil, position: position, fileSizeBytes: upload.fileSize, createdAt: .now)
+        let track = Track(id: UUID(), playlistId: playlist.id, uploaderId: uploaderID, title: upload.title, artistName: upload.artistName, albumName: upload.albumName, durationSeconds: upload.duration, audioPath: upload.fileURL.lastPathComponent, artworkPath: nil, position: position, fileSizeBytes: upload.fileSize, createdAt: .now, waveformSamples: upload.waveformSamples)
         tracksByPlaylist[playlist.id, default: []].append(track)
         if let index = playlists.firstIndex(where: { $0.id == playlist.id }) { playlists[index].trackCount = tracksByPlaylist[playlist.id]?.count }
         return track
@@ -128,19 +190,46 @@ actor DemoMusicRepository: MusicRepository {
     func toggleUserFollow(userID: UUID) async throws -> Bool { false }
 
     func searchArtists(query: String) async throws -> [ArtistSummary] {
-        let names = Set(playlists.map(\.artistName))
+        let allTracks = tracksByPlaylist.values.flatMap { $0 }
+        let names = Set(
+            playlists.flatMap { ArtistCreditParser.names(from: $0.artistName) }
+                + allTracks.flatMap { ArtistCreditParser.names(from: $0.artistName) }
+        )
         return names.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }.sorted().map { name in
-            let key = name.lowercased()
-            return ArtistSummary(artistKey: key, artistName: name, playlistCount: playlists.filter { $0.artistName == name }.count, trackCount: tracksByPlaylist.values.flatMap { $0 }.filter { $0.artistName == name }.count, followerCount: followedArtists.contains(key) ? 1 : 0, isFollowed: followedArtists.contains(key))
+            let key = ArtistCreditParser.key(for: name)
+            let artistTracks = allTracks.filter {
+                ArtistCreditParser.names(from: $0.artistName).contains { ArtistCreditParser.key(for: $0) == key }
+            }
+            let playlistIDs = Set(
+                playlists.filter { playlist in
+                    ArtistCreditParser.names(from: playlist.artistName).contains { ArtistCreditParser.key(for: $0) == key }
+                        || artistTracks.contains { track in track.playlistId == playlist.id }
+                }.map(\.id)
+            )
+            return ArtistSummary(artistKey: key, artistName: name, playlistCount: playlistIDs.count, trackCount: artistTracks.count, followerCount: followedArtists.contains(key) ? 1 : 0, isFollowed: followedArtists.contains(key), isVerified: verifiedArtists.contains(key))
         }
     }
 
-    func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist] { playlists.filter { $0.artistName.lowercased() == artistKey } }
+    func fetchArtistPlaylists(artistKey: String) async throws -> [Playlist] {
+        let matchingPlaylistIDs = Set(tracksByPlaylist.values.flatMap { $0 }.filter {
+            ArtistCreditParser.names(from: $0.artistName).contains { ArtistCreditParser.key(for: $0) == artistKey }
+        }.map(\.playlistId))
+        return playlists.filter {
+            matchingPlaylistIDs.contains($0.id)
+                || ArtistCreditParser.names(from: $0.artistName).contains { ArtistCreditParser.key(for: $0) == artistKey }
+        }
+    }
 
     func toggleArtistFollow(artistName: String) async throws -> Bool {
         let key = artistName.lowercased()
         if followedArtists.contains(key) { followedArtists.remove(key); return false }
         followedArtists.insert(key); return true
+    }
+
+    func toggleArtistVerification(artistName: String) async throws -> Bool {
+        let key = artistName.lowercased()
+        if verifiedArtists.contains(key) { verifiedArtists.remove(key); return false }
+        verifiedArtists.insert(key); return true
     }
 
     func searchPlaylists(query: String) async throws -> [Playlist] {
@@ -161,8 +250,8 @@ actor DemoMusicRepository: MusicRepository {
 
     func fetchTrackComments(trackID: UUID) async throws -> [TrackComment] { commentsByTrack[trackID] ?? [] }
 
-    func addTrackComment(trackID: UUID, userID: UUID, body: String) async throws {
-        let comment = TrackComment(id: UUID(), trackId: trackID, userId: userID, body: body, createdAt: .now, updatedAt: .now, displayName: "Vitor", username: "vitor", avatarPath: nil, likeCount: 0, isLiked: false)
+    func addTrackComment(trackID: UUID, userID: UUID, body: String, timestampSeconds: Double?) async throws {
+        let comment = TrackComment(id: UUID(), trackId: trackID, userId: userID, body: body, timestampSeconds: timestampSeconds, createdAt: .now, updatedAt: .now, displayName: "Vitor", username: "vitor", avatarPath: nil, likeCount: 0, isLiked: false)
         commentsByTrack[trackID, default: []].append(comment)
     }
 
@@ -174,5 +263,136 @@ actor DemoMusicRepository: MusicRepository {
 
     func fetchTrackSocialSummary(trackID: UUID) async throws -> TrackSocialSummary {
         TrackSocialSummary(likeCount: likedTracks.contains(trackID) ? 1 : 0, commentCount: commentsByTrack[trackID]?.count ?? 0, isLiked: likedTracks.contains(trackID))
+    }
+
+    func recordPlayback(trackID: UUID, positionSeconds: Double) async throws {
+        guard let track = tracksByPlaylist.values.flatMap({ $0 }).first(where: { $0.id == trackID }),
+              let playlist = playlists.first(where: { $0.id == track.playlistId }) else { return }
+        let previousPlayCount = history.first(where: { $0.trackId == trackID })?.playCount ?? 0
+        history.removeAll { $0.trackId == trackID }
+        history.insert(PlaybackHistoryItem(trackId: track.id, playlistId: track.playlistId, uploaderId: track.uploaderId, title: track.title, artistName: track.artistName, albumName: track.albumName, durationSeconds: track.durationSeconds, audioPath: track.audioPath, artworkPath: track.artworkPath, position: track.position, fileSizeBytes: track.fileSizeBytes, trackCreatedAt: track.createdAt, waveformSamples: track.waveformSamples, playlistTitle: playlist.title, playlistCoverPath: playlist.coverPath, lastPlayedAt: .now, playCount: previousPlayCount + 1), at: 0)
+    }
+
+    func fetchPlaybackHistory() async throws -> [PlaybackHistoryItem] { history }
+    func fetchTopPublicTracks(limit: Int) async throws -> [PublicTrackRankingItem] {
+        let publicPlaylists = Dictionary(uniqueKeysWithValues: playlists.filter { $0.visibility == .publicAccess }.map { ($0.id, $0) })
+        let playCounts = Dictionary(uniqueKeysWithValues: history.map { ($0.trackId, $0.playCount) })
+        return tracksByPlaylist.values.flatMap { $0 }
+            .compactMap { track -> PublicTrackRankingItem? in
+                guard let playlist = publicPlaylists[track.playlistId] else { return nil }
+                return PublicTrackRankingItem(
+                    trackId: track.id, playlistId: track.playlistId, uploaderId: track.uploaderId,
+                    title: track.title, artistName: track.artistName, albumName: track.albumName,
+                    durationSeconds: track.durationSeconds, audioPath: track.audioPath,
+                    artworkPath: track.artworkPath, position: track.position,
+                    fileSizeBytes: track.fileSizeBytes, trackCreatedAt: track.createdAt,
+                    waveformSamples: track.waveformSamples, playlistTitle: playlist.title,
+                    playlistCoverPath: playlist.coverPath, playCount: playCounts[track.id] ?? 0
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.playCount == rhs.playCount ? lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending : lhs.playCount > rhs.playCount
+            }
+            .prefix(max(1, limit))
+            .map { $0 }
+    }
+    func searchPublicTracks(query: String, limit: Int) async throws -> [PublicTrackRankingItem] {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await fetchTopPublicTracks(limit: 100)
+            .filter {
+                clean.isEmpty
+                    || $0.title.localizedCaseInsensitiveContains(clean)
+                    || $0.artistName.localizedCaseInsensitiveContains(clean)
+                    || $0.playlistTitle.localizedCaseInsensitiveContains(clean)
+            }
+            .prefix(max(1, limit))
+            .map { $0 }
+    }
+    func clearPlaybackHistory() async throws { history.removeAll() }
+    func fetchNotifications() async throws -> [SocialNotification] { [] }
+    func markAllNotificationsRead() async throws { }
+
+    func fetchCardDashboard() async throws -> CardGameDashboard {
+        CardGameDashboard(
+            xp: history.reduce(0) { $0 + $1.playCount * 5 }, level: 1, nextLevelXP: 500,
+            currentStreak: 1, bestStreak: 1, unopenedPacks: 1, totalCards: 3,
+            uniqueCards: 3, completedAlbums: 0, completedTrades: 0,
+            favoriteArtists: ["kanye west"], dailyClaimAvailable: true
+        )
+    }
+
+    func fetchCardInventory() async throws -> [CollectibleCardItem] { demoCards }
+    func fetchCardPacks() async throws -> [CardPackSummary] {
+        [CardPackSummary(packId: UUID(uuidString: "C1000000-0000-0000-0000-000000000001")!, source: "Boas-vindas", cardCount: 3, createdAt: .now)]
+    }
+    func fetchCardAlbumProgress() async throws -> [CardAlbumProgress] {
+        [CardAlbumProgress(albumId: UUID(), albumTitle: "Coleção de demonstração", artistName: "YePly Sessions", artworkPath: nil, ownedUnique: demoCards.count, totalCards: 13, isComplete: false, badgeId: nil, badgeEquipped: false)]
+    }
+    func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem] { [] }
+    func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge] {
+        guard profileID == demoUserID else { return [] }
+        return []
+    }
+    func fetchOwnedProfileBadges(profileID: UUID) async throws -> [ProfileCollectibleBadge] { [] }
+    func fetchFeaturedProfileCard(profileID: UUID) async throws -> CollectibleCardItem? { nil }
+    func fetchCardAchievements() async throws -> [CardAchievement] {
+        [
+            CardAchievement(achievementKey: "night_listener", title: "Night Listener", description: "Ouça 100 músicas entre 00:00 e 05:00.", icon: "moon.stars.fill", progress: 18, target: 100, unlockedAt: nil, rewardClaimedAt: nil),
+            CardAchievement(achievementKey: "day_one", title: "Day One", description: "Está no YePly desde a versão Beta.", icon: "figure.wave", progress: 1, target: 1, unlockedAt: .now, rewardClaimedAt: nil)
+        ]
+    }
+    func fetchCardArtists() async throws -> [CardArtistOption] { [CardArtistOption(artistKey: "kanye west", artistName: "Kanye West", cardCount: 3)] }
+    func fetchCardTrades() async throws -> [CardTradeSummary] { [] }
+    func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem] { demoCards }
+    func fetchCardWishlist() async throws -> [CardWishlistItem] { [] }
+    func toggleCardWishlist(definitionID: UUID) async throws -> CardRewardResult { demoReward("Lista de desejos atualizada.") }
+    func fetchCardPackStore() async throws -> [CardPackStoreProduct] { CardPackProductKind.allCases.map { CardPackStoreProduct(kind: $0) } }
+    func buyCardPack(product: CardPackProductKind) async throws -> CardRewardResult { demoReward("Pack comprado.") }
+    func claimDailyCardReward() async throws -> CardRewardResult { demoReward("Pack diário recebido.") }
+    func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID { UUID() }
+    func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult { demoReward("\(packCount) pack(s) enviado(s) para @\(username).") }
+    func redeemPackCode(_ code: String) async throws -> CardRewardResult { demoReward("Código resgatado.") }
+    func openCardPack(id: UUID) async throws -> [CollectibleCardItem] { demoCards }
+    func openAllCardPacks() async throws -> [CollectibleCardItem] { demoCards }
+    func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult { demoReward(nil) }
+    func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult { demoReward("Artistas favoritos atualizados.") }
+    func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult { demoReward("Badge equipada.") }
+    func setFeaturedProfileCard(instanceID: UUID?) async throws -> CardRewardResult { demoReward(instanceID == nil ? "Destaque removido." : "Carta colocada em destaque.") }
+    func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult { demoReward("Pack de conquista recebido.") }
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID { UUID() }
+    func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult { demoReward(accept ? "Troca concluída." : "Troca recusada.") }
+    func fetchTradeDetail(id: UUID) async throws -> [CardTradeDetailItem] { [] }
+    func toggleCardProtection(instanceID: UUID) async throws -> CardRewardResult { demoReward("Proteção atualizada.") }
+    func fetchCardFolders(profileID: UUID?) async throws -> [CardFolder] { [] }
+    func createCardFolder(name: String, emoji: String, isPublic: Bool) async throws -> UUID { UUID() }
+    func deleteCardFolder(id: UUID) async throws -> Bool { true }
+    func toggleCardFolderItem(folderID: UUID, instanceID: UUID) async throws -> CardRewardResult { demoReward(nil) }
+    func fetchUserWishlist(username: String) async throws -> [CardWishlistItem] { [] }
+    func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary? { nil }
+    func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence? { nil }
+    func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws {}
+    func fetchPublicCardOffers(profileID: UUID?) async throws -> [CardPublicOffer] { [] }
+    func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult { demoReward(nil) }
+    func buyPublicCardOffer(id: UUID) async throws -> CardMarketPurchaseResult {
+        CardMarketPurchaseResult(success: true, offerId: id, instanceId: UUID(), price: 0, tax: 0, sellerReceives: 0, coinBalance: 0)
+    }
+    func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult { demoReward("Conquista Show Off atualizada.") }
+    func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult { demoReward("Catálogo sincronizado.") }
+    func refreshCardRarities() async throws -> CardRewardResult { demoReward("Raridades recalculadas.") }
+
+    private var demoCards: [CollectibleCardItem] {
+        let names = ["Stronger", "Heartless", "Flashing Lights"]
+        let rarities: [CollectibleCardRarity] = [.common, .epic, .mythic]
+        return names.indices.map { index in
+            CollectibleCardItem(
+                instanceId: UUID(), serialNumber: index + 1, definitionId: UUID(), trackId: nil,
+                title: names[index], artistName: "Kanye West", albumName: "Demonstração",
+                artworkPath: nil, rarity: rarities[index], acquiredAt: .now
+            )
+        }
+    }
+
+    private func demoReward(_ message: String?) -> CardRewardResult {
+        CardRewardResult(success: true, message: message, packId: nil, packsAwarded: message == nil ? 0 : 1, xpAwarded: 5, streak: 1, achievementKey: nil, rewardClaimed: nil, packDropped: false, accepted: true, claimed: true, redeemed: true)
     }
 }

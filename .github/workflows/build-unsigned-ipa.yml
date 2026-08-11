@@ -12,10 +12,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
 
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project YePly.xcodeproj -scheme YePly
@@ -42,19 +42,19 @@ jobs:
           mkdir -p package/Payload
           ditto "$APP" package/Payload/YePly.app
           cd package
-          /usr/bin/zip -qry ../YePly-1.0.0-unsigned.ipa Payload
+          /usr/bin/zip -qry ../YePly-2.10.1-unsigned.ipa Payload
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: YePly-IPA
-          path: YePly-1.0.0-unsigned.ipa
+          path: YePly-2.10.1-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload build log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: YePly-build-log
           path: build.log
