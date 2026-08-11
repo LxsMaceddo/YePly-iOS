@@ -113,12 +113,40 @@ private struct CardTradeResponseInput: Encodable {
     let pAccept: Bool
     enum CodingKeys: String, CodingKey { case pTradeId = "p_trade_id"; case pAccept = "p_accept" }
 }
+private struct CardTradeIDInput: Encodable {
+    let pTradeId: UUID
+    enum CodingKeys: String, CodingKey { case pTradeId = "p_trade_id" }
+}
 private struct ExternalCardCatalogInput: Encodable {
     let artistName: String
     enum CodingKeys: String, CodingKey { case artistName = "artist_name" }
 }
 private struct ExternalCardCatalogError: Decodable { let error: String? }
 private struct CardTradeableInput: Encodable { let pUsername: String; enum CodingKeys: String, CodingKey { case pUsername = "p_username" } }
+private struct OptionalProfileIDInput: Encodable { let pProfileId: UUID?; enum CodingKeys: String, CodingKey { case pProfileId = "p_profile_id" } }
+private struct CardInstanceInput: Encodable { let pInstanceId: UUID; enum CodingKeys: String, CodingKey { case pInstanceId = "p_instance_id" } }
+private struct CardFolderCreateInput: Encodable {
+    let pName: String; let pEmoji: String; let pIsPublic: Bool
+    enum CodingKeys: String, CodingKey { case pName = "p_name"; case pEmoji = "p_emoji"; case pIsPublic = "p_is_public" }
+}
+private struct CardFolderIDInput: Encodable { let pFolderId: UUID; enum CodingKeys: String, CodingKey { case pFolderId = "p_folder_id" } }
+private struct CardFolderItemInput: Encodable {
+    let pFolderId: UUID; let pInstanceId: UUID
+    enum CodingKeys: String, CodingKey { case pFolderId = "p_folder_id"; case pInstanceId = "p_instance_id" }
+}
+private struct PublicOfferInput: Encodable {
+    let pInstanceId: UUID; let pAskingCoins: Int; let pNote: String?
+    enum CodingKeys: String, CodingKey { case pInstanceId = "p_instance_id"; case pAskingCoins = "p_asking_coins"; case pNote = "p_note" }
+}
+private struct PresenceInput: Encodable {
+    let pTrackId: UUID; let pTitle: String; let pArtistName: String; let pAlbumName: String?
+    let pArtworkPath: String?; let pPositionSeconds: Int; let pDurationSeconds: Int; let pIsPlaying: Bool
+    enum CodingKeys: String, CodingKey {
+        case pTrackId = "p_track_id"; case pTitle = "p_title"; case pArtistName = "p_artist_name"
+        case pAlbumName = "p_album_name"; case pArtworkPath = "p_artwork_path"
+        case pPositionSeconds = "p_position_seconds"; case pDurationSeconds = "p_duration_seconds"; case pIsPlaying = "p_is_playing"
+    }
+}
 private struct CardTradeFeedResponse: Decodable { let trades: [CardTradeSummary] }
 private struct PlaylistUpdate: Encodable {
     let title: String
@@ -325,10 +353,18 @@ actor SupabaseMusicRepository: MusicRepository {
         var offset = 0
         var result: [CollectibleCardItem] = []
         while true {
-            let page: [CollectibleCardItem] = try await client.rpc(
-                "card_inventory_feed_page",
-                params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
-            ).execute().value
+            let page: [CollectibleCardItem]
+            do {
+                page = try await client.rpc(
+                    "card_inventory_social_feed_page",
+                    params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
+                ).execute().value
+            } catch {
+                page = try await client.rpc(
+                    "card_inventory_feed_page",
+                    params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
+                ).execute().value
+            }
             result.append(contentsOf: page)
             if page.count < pageSize { break }
             offset += page.count
@@ -513,6 +549,59 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult {
         try await client.rpc("respond_card_trade", params: CardTradeResponseInput(pTradeId: id, pAccept: accept)).execute().value
+    }
+
+    func fetchTradeDetail(id: UUID) async throws -> [CardTradeDetailItem] {
+        try await client.rpc("card_trade_detail", params: CardTradeIDInput(pTradeId: id)).execute().value
+    }
+
+    func toggleCardProtection(instanceID: UUID) async throws -> CardRewardResult {
+        try await client.rpc("toggle_card_protection", params: CardInstanceInput(pInstanceId: instanceID)).execute().value
+    }
+
+    func fetchCardFolders(profileID: UUID?) async throws -> [CardFolder] {
+        try await client.rpc("card_folder_feed", params: OptionalProfileIDInput(pProfileId: profileID)).execute().value
+    }
+
+    func createCardFolder(name: String, emoji: String, isPublic: Bool) async throws -> UUID {
+        try await client.rpc("create_card_folder", params: CardFolderCreateInput(pName: name, pEmoji: emoji, pIsPublic: isPublic)).execute().value
+    }
+
+    func deleteCardFolder(id: UUID) async throws -> Bool {
+        try await client.rpc("delete_card_folder", params: CardFolderIDInput(pFolderId: id)).execute().value
+    }
+
+    func toggleCardFolderItem(folderID: UUID, instanceID: UUID) async throws -> CardRewardResult {
+        try await client.rpc("toggle_card_folder_item", params: CardFolderItemInput(pFolderId: folderID, pInstanceId: instanceID)).execute().value
+    }
+
+    func fetchUserWishlist(username: String) async throws -> [CardWishlistItem] {
+        try await client.rpc("card_user_wishlist", params: CardTradeableInput(pUsername: username)).execute().value
+    }
+
+    func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary? {
+        let rows: [CollectorProfileSummary] = try await client.rpc("card_collector_profile", params: ProfileIDInput(pProfileId: profileID)).execute().value
+        return rows.first
+    }
+
+    func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence? {
+        let rows: [ProfileMusicPresence] = try await client.rpc("profile_music_presence", params: ProfileIDInput(pProfileId: profileID)).execute().value
+        return rows.first
+    }
+
+    func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws {
+        let input = PresenceInput(pTrackId: track.id, pTitle: track.title, pArtistName: track.artistName,
+                                  pAlbumName: track.albumName, pArtworkPath: artworkPath ?? track.artworkPath,
+                                  pPositionSeconds: positionSeconds, pDurationSeconds: durationSeconds, pIsPlaying: isPlaying)
+        try await client.rpc("upsert_profile_music_presence", params: input).execute()
+    }
+
+    func fetchPublicCardOffers() async throws -> [CardPublicOffer] {
+        try await client.rpc("card_public_offer_feed").execute().value
+    }
+
+    func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult {
+        try await client.rpc("toggle_public_card_offer", params: PublicOfferInput(pInstanceId: instanceID, pAskingCoins: askingCoins, pNote: note)).execute().value
     }
 
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult {

@@ -259,6 +259,15 @@ struct ProfileBadgeArtwork: View {
         Group {
             if kind != .achievement, artworkPath != nil {
                 CardBrowserArtwork(path: artworkPath, seed: seed, title: title, tint: YePlyTheme.accent, cornerRadius: size / 2)
+            } else if kind == .achievement, title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current) == "day one" {
+                TimelineView(.animation) { context in
+                    let rotation = Angle.degrees(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 8) * 45)
+                    ZStack {
+                        Circle().fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red], center: .center, angle: rotation))
+                        Circle().fill(.black.opacity(0.28)).padding(4)
+                        Text(emoji ?? "🗿").font(.system(size: size * 0.46))
+                    }
+                }
             } else {
                 ZStack {
                     Circle().fill(LinearGradient(colors: kind == .discography ? [Color.orange, YePlyTheme.accentSoft] : [YePlyTheme.accentSoft, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))

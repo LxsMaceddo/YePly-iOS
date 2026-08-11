@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftUI
 import UIKit
+import ImageIO
 
 private struct ProfileScrollOffsetKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
@@ -94,6 +95,14 @@ struct ProfileView: View {
                             ProfileRow(icon: "star.fill", title: "Artistas favoritos", subtitle: "Escolha os artistas dos packs de conquista")
                         }
                         .buttonStyle(.plain)
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        NavigationLink { ProfileWishlistView(username: session.profile?.username ?? "") } label: {
+                            ProfileRow(icon: "heart.fill", title: "Wishlist pública", subtitle: "Cartas desejadas que outros colecionadores podem oferecer")
+                        }.buttonStyle(.plain)
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        NavigationLink { ProfileFoldersView(profileID: session.userID) } label: {
+                            ProfileRow(icon: "folder.fill", title: "Pastas públicas", subtitle: "Organize e apresente partes da sua coleção")
+                        }.buttonStyle(.plain)
                         Divider().overlay(YePlyTheme.line).padding(.leading, 56)
                         ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Arquivos offline protegidos neste iPhone")
                         Divider().overlay(YePlyTheme.line).padding(.leading, 56)
@@ -260,6 +269,26 @@ struct ProfileView: View {
     }
 }
 
+private struct ProfileWishlistView: View {
+    @EnvironmentObject private var container: AppContainer
+    let username: String
+    @State private var items: [CardWishlistItem] = []
+    var body: some View {
+        ScrollView { LazyVStack(spacing: 10) { ForEach(items) { item in HStack(spacing: 12) { CardBrowserArtwork(path: item.artworkPath, seed: item.definitionId.uuidString, title: item.title, tint: item.rarity.accentColor, cornerRadius: 12).frame(width: 64, height: 64); VStack(alignment: .leading) { Text(item.title).font(.headline); Text("\(item.artistName) · \(item.albumName)").font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1) }; Spacer(); Image(systemName: "heart.fill").foregroundStyle(YePlyTheme.accent) }.padding(11).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17)) } }.padding(18) }
+            .navigationTitle("Wishlist").navigationBarTitleDisplayMode(.inline).task { items = (try? await container.repository.fetchUserWishlist(username: username)) ?? [] }.yeplyBackground()
+    }
+}
+
+private struct ProfileFoldersView: View {
+    @EnvironmentObject private var container: AppContainer
+    let profileID: UUID?
+    @State private var folders: [CardFolder] = []
+    var body: some View {
+        ScrollView { LazyVStack(spacing: 12) { ForEach(folders) { folder in VStack(alignment: .leading, spacing: 10) { HStack { Text(folder.emoji).font(.title2); VStack(alignment: .leading) { Text(folder.name).font(.headline); Text("\(folder.itemCount) cartas").font(.caption).foregroundStyle(YePlyTheme.secondary) }; Spacer(); Image(systemName: folder.isPublic ? "globe" : "lock.fill") }; ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) { ForEach(folder.items) { card in CardBrowserArtwork(path: card.artworkPath, seed: card.definitionId.uuidString, title: card.title, tint: card.rarity.accentColor, cornerRadius: 11).frame(width: 76, height: 76) } } } }.padding(14).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 19)) } }.padding(18) }
+            .navigationTitle("Pastas").navigationBarTitleDisplayMode(.inline).task { folders = (try? await container.repository.fetchCardFolders(profileID: profileID)) ?? [] }.yeplyBackground()
+    }
+}
+
 private struct ProfileHeroBackdrop: View {
     let url: URL?
 
@@ -272,20 +301,9 @@ private struct ProfileHeroBackdrop: View {
                 endPoint: .bottomTrailing
             )
 
-            if let url, url.isFileURL, let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+            if let url {
+                ProfileMediaImage(url: url)
                     .frame(width: viewport.size.width, height: viewport.size.height)
-            } else if let url {
-                YePlyRemoteImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.18))) { phase in
-                    if case let .success(image) = phase {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: viewport.size.width, height: viewport.size.height)
-                    }
-                }
             }
 
             LinearGradient(
@@ -304,6 +322,46 @@ private struct ProfileHeroBackdrop: View {
         }
         .accessibilityHidden(true)
     }
+}
+
+struct ProfileMediaImage: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { AnimatedProfileUIImageView(image: image) }
+            else { Color.clear.overlay(ProgressView().tint(.white.opacity(0.7))) }
+        }
+        .task(id: url) {
+            let data: Data?
+            if url.isFileURL { data = try? Data(contentsOf: url) }
+            else { data = try? await URLSession.shared.data(from: url).0 }
+            guard let data else { return }
+            image = Self.decode(data)
+        }
+    }
+
+    private static func decode(_ data: Data) -> UIImage? {
+        guard data.isGIF, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return UIImage(data: data) }
+        let count = CGImageSourceGetCount(source)
+        var images: [UIImage] = []
+        var duration = 0.0
+        for index in 0..<count {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            images.append(UIImage(cgImage: cgImage))
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            duration += (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0.1
+        }
+        return images.count > 1 ? UIImage.animatedImage(with: images, duration: max(duration, 0.1)) : images.first
+    }
+}
+
+private struct AnimatedProfileUIImageView: UIViewRepresentable {
+    let image: UIImage
+    func makeUIView(context: Context) -> UIImageView { let view = UIImageView(); view.contentMode = .scaleAspectFill; view.clipsToBounds = true; return view }
+    func updateUIView(_ view: UIImageView, context: Context) { if view.image !== image { view.image = image; view.startAnimating() } }
 }
 
 private struct ProfileAvatarView: View {
@@ -405,6 +463,8 @@ private struct ProfileEditorView: View {
     @State private var selectedBackgroundPhoto: PhotosPickerItem?
     @State private var avatarPreview: UIImage?
     @State private var backgroundPreview: UIImage?
+    @State private var backgroundOriginalData: Data?
+    @State private var backgroundContentType = "image/jpeg"
     @State private var currentAvatarURL: URL?
     @State private var currentBackgroundURL: URL?
     @State private var isSaving = false
@@ -545,6 +605,8 @@ private struct ProfileEditorView: View {
             .onChange(of: selectedBackgroundPhoto) { _, photo in
                 Task {
                     guard let data = try? await photo?.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+                    backgroundOriginalData = data
+                    backgroundContentType = data.isGIF ? "image/gif" : "image/jpeg"
                     backgroundPreview = image
                 }
             }
@@ -593,7 +655,7 @@ private struct ProfileEditorView: View {
         isSaving = true
         let tastes = Self.genrePresets.filter(selectedGenres.contains)
         let jpeg = avatarPreview.flatMap(makeAvatarJPEG)
-        let backgroundJPEG = backgroundPreview.flatMap(makeBackgroundJPEG)
+        let backgroundJPEG = backgroundContentType == "image/gif" ? backgroundOriginalData : backgroundPreview.flatMap(makeBackgroundJPEG)
         Task {
             if await session.updateProfile(
                 displayName: displayName,
@@ -601,7 +663,8 @@ private struct ProfileEditorView: View {
                 tastes: tastes,
                 residenceCountryCode: selectedCountryCode,
                 avatarJPEG: jpeg,
-                backgroundJPEG: backgroundJPEG
+                backgroundJPEG: backgroundJPEG,
+                backgroundContentType: backgroundContentType
             ) { dismiss() }
             isSaving = false
         }
@@ -641,6 +704,13 @@ private struct ProfileEditorView: View {
             image.draw(in: CGRect(origin: origin, size: drawSize))
         }
         return normalized.jpegData(compressionQuality: 0.80)
+    }
+}
+
+private extension Data {
+    var isGIF: Bool {
+        guard count >= 6, let header = String(data: prefix(6), encoding: .ascii) else { return false }
+        return header == "GIF87a" || header == "GIF89a"
     }
 }
 

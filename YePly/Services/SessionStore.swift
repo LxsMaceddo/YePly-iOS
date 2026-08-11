@@ -108,7 +108,8 @@ final class SessionStore: ObservableObject {
         tastes: [String],
         residenceCountryCode: String?,
         avatarJPEG: Data?,
-        backgroundJPEG: Data?
+        backgroundJPEG: Data?,
+        backgroundContentType: String = "image/jpeg"
     ) async -> Bool {
         errorMessage = nil
         guard var current = profile else { errorMessage = YePlyError.noActiveUser.localizedDescription; return false }
@@ -156,14 +157,15 @@ final class SessionStore: ObservableObject {
             }
 
             if let backgroundJPEG {
-                guard backgroundJPEG.count <= 5 * 1_024 * 1_024 else {
-                    throw YePlyError.message("A imagem de fundo deve ter no máximo 5 MB.")
+                guard backgroundJPEG.count <= 12 * 1_024 * 1_024 else {
+                    throw YePlyError.message("A imagem ou GIF de fundo deve ter no máximo 12 MB.")
                 }
-                let path = "\(current.id.uuidString.lowercased())/background/\(UUID().uuidString.lowercased()).jpg"
+                let isGIF = backgroundContentType.lowercased() == "image/gif"
+                let path = "\(current.id.uuidString.lowercased())/background/\(UUID().uuidString.lowercased()).\(isGIF ? "gif" : "jpg")"
                 try await client.storage.from("avatars").upload(
                     path,
                     data: backgroundJPEG,
-                    options: FileOptions(cacheControl: "86400", contentType: "image/jpeg", upsert: false)
+                    options: FileOptions(cacheControl: "86400", contentType: isGIF ? "image/gif" : "image/jpeg", upsert: false)
                 )
                 uploadedPaths.append(path)
                 newBackgroundPath = path

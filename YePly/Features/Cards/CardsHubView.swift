@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum CardsHubSection: String, CaseIterable, Identifiable {
-    case packs, store, collection, albums, achievements, wishlist, trades
+    case packs, store, collection, albums, folders, achievements, wishlist, offers, trades
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -9,8 +9,10 @@ private enum CardsHubSection: String, CaseIterable, Identifiable {
         case .store: "Loja"
         case .collection: "Coleção"
         case .albums: "Álbuns"
+        case .folders: "Pastas"
         case .achievements: "Conquistas"
         case .wishlist: "Desejadas"
+        case .offers: "Ofertas"
         case .trades: "Trocas"
         }
     }
@@ -21,8 +23,10 @@ private enum CardsHubSection: String, CaseIterable, Identifiable {
         case .store: "bag.fill"
         case .collection: "rectangle.stack.fill"
         case .albums: "square.stack.fill"
+        case .folders: "folder.fill"
         case .achievements: "trophy.fill"
         case .wishlist: "heart.fill"
+        case .offers: "megaphone.fill"
         case .trades: "arrow.left.arrow.right"
         }
     }
@@ -68,6 +72,8 @@ private final class CardsHubViewModel: ObservableObject {
     @Published var artists: [CardArtistOption] = []
     @Published var trades: [CardTradeSummary] = []
     @Published var wishlist: [CardWishlistItem] = []
+    @Published var folders: [CardFolder] = []
+    @Published var publicOffers: [CardPublicOffer] = []
     @Published var storeProducts = CardPackProductKind.allCases.map { CardPackStoreProduct(kind: $0) }
     @Published var openedPack: YePlyOpenedPack?
     @Published var openedPacks: [YePlyOpenedPack] = []
@@ -88,6 +94,8 @@ private final class CardsHubViewModel: ObservableObject {
             async let achievements = repository.fetchCardAchievements()
             async let artists = repository.fetchCardArtists()
             async let trades = repository.fetchCardTrades()
+            async let folders = repository.fetchCardFolders(profileID: nil)
+            async let offers = repository.fetchPublicCardOffers()
             self.dashboard = try await dashboard
             self.inventory = try await inventory
             self.packs = try await packs
@@ -96,6 +104,8 @@ private final class CardsHubViewModel: ObservableObject {
             self.achievements = try await achievements
             self.artists = try await artists
             self.trades = try await trades
+            self.folders = (try? await folders) ?? []
+            self.publicOffers = (try? await offers) ?? []
             do {
                 let loadedWishlist = try await repository.fetchCardWishlist()
                 self.wishlist = loadedWishlist
@@ -212,6 +222,16 @@ private final class CardsHubViewModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
+    func createFolder(name: String, repository: any MusicRepository) async {
+        do { _ = try await repository.createCardFolder(name: name, emoji: "📁", isPublic: true); await load(repository: repository) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    func deleteFolder(_ folder: CardFolder, repository: any MusicRepository) async {
+        do { _ = try await repository.deleteCardFolder(id: folder.id); await load(repository: repository) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
     func syncKanye(repository: any MusicRepository) async {
         do {
             let reward = try await repository.syncCollectibleCatalog(artistName: "Kanye West")
@@ -232,6 +252,10 @@ struct CardsHubView: View {
     @State private var showingFavorites = false
     @State private var showingTradeCreator = false
     @State private var showingPackCodeCreator = false
+    @State private var showingFolderCreator = false
+    @State private var folderName = ""
+    @State private var tradeTargetUsername: String?
+    @State private var selectedTrade: CardTradeSummary?
 
     var body: some View {
         ScrollView {
@@ -271,6 +295,14 @@ struct CardsHubView: View {
                 onCreated: { Task { await model.load(repository: container.repository) } }
             )
         }
+        .sheet(isPresented: Binding(get: { tradeTargetUsername != nil }, set: { if !$0 { tradeTargetUsername = nil } })) {
+            CreateCardTradeView(ownCards: model.inventory, coinBalance: model.dashboard.coinBalance ?? 0, initialUsername: tradeTargetUsername, onCreated: { Task { await model.load(repository: container.repository) } })
+        }
+        .sheet(item: $selectedTrade) { trade in
+            CardTradeInspectionView(trade: trade) { accept in
+                Task { await model.respond(trade, accept: accept, repository: container.repository); selectedTrade = nil }
+            }
+        }
         .sheet(isPresented: $showingPackCodeCreator) {
             CreatePackCodeView(artists: model.artists) { createdCode in
                 model.rewardMessage = "Código \(createdCode) criado e pronto para compartilhar."
@@ -297,6 +329,11 @@ struct CardsHubView: View {
         .alert("Cartas", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
+        .alert("Nova pasta pública", isPresented: $showingFolderCreator) {
+            TextField("Nome da pasta", text: $folderName)
+            Button("Criar") { let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines); folderName = ""; Task { await model.createFolder(name: name, repository: container.repository) } }.disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancelar", role: .cancel) { folderName = "" }
+        } message: { Text("Organize suas cartas e mostre esta pasta no seu perfil.") }
         .overlay(alignment: .top) {
             if let message = model.rewardMessage {
                 Label(message, systemImage: "gift.fill")
@@ -384,8 +421,10 @@ struct CardsHubView: View {
         case .store: storeSection
         case .collection: collectionSection
         case .albums: albumsSection
+        case .folders: foldersSection
         case .achievements: achievementsSection
         case .wishlist: wishlistSection
+        case .offers: publicOffersSection
         case .trades: tradesSection
         }
     }
@@ -454,10 +493,6 @@ struct CardsHubView: View {
                     Text("Escolha sua próxima abertura").font(.title3.bold())
                 }
                 Spacer()
-                Text("Economia protegida")
-                    .font(.caption2.bold()).foregroundStyle(.green)
-                    .padding(.horizontal, 9).frame(height: 26)
-                    .background(Color.green.opacity(0.13), in: Capsule())
             }
 
             LazyVStack(spacing: 12) {
@@ -472,13 +507,37 @@ struct CardsHubView: View {
                 }
             }
 
-            Label(
-                "As cartas excedentes viram moedas automaticamente. Os valores variam por raridade, popularidade e um fator aleatório controlado.",
-                systemImage: "shield.checkered"
-            )
-            .font(.caption).foregroundStyle(YePlyTheme.secondary)
-            .padding(14)
-            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        }
+    }
+
+    private var foldersSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack { VStack(alignment: .leading) { Text("ARQUIVO PESSOAL").font(.caption2.bold()).tracking(1.5).foregroundStyle(YePlyTheme.accent); Text("Suas pastas de cartas").font(.title3.bold()) }; Spacer(); Button { showingFolderCreator = true } label: { Image(systemName: "folder.badge.plus").font(.title2) } }
+            if model.folders.isEmpty {
+                ContentUnavailableView("Nenhuma pasta", systemImage: "folder", description: Text("Crie uma pasta e adicione cartas pelo painel de detalhes."))
+            } else {
+                ForEach(model.folders) { folder in
+                    VStack(alignment: .leading, spacing: 11) {
+                        HStack { Text(folder.emoji).font(.title2); VStack(alignment: .leading) { Text(folder.name).font(.headline); Text("\(folder.itemCount) cartas · \(folder.isPublic ? "Pública" : "Privada")").font(.caption).foregroundStyle(YePlyTheme.secondary) }; Spacer(); Menu { Button("Excluir pasta", role: .destructive) { Task { await model.deleteFolder(folder, repository: container.repository) } } } label: { Image(systemName: "ellipsis") } }
+                        if !folder.items.isEmpty { ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 9) { ForEach(folder.items.prefix(10)) { card in Button { selectedCard = card } label: { CardBrowserArtwork(path: card.artworkPath, seed: card.definitionId.uuidString, title: card.title, tint: card.rarity.accentColor, cornerRadius: 12).frame(width: 84, height: 84) }.buttonStyle(.plain) } } } }
+                    }.padding(15).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 20))
+                }
+            }
+        }
+    }
+
+    private var publicOffersSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text("MERCADO DA COMUNIDADE").font(.caption2.bold()).tracking(1.5).foregroundStyle(YePlyTheme.accent)
+            Text("Ofertas públicas").font(.title3.bold())
+            if model.publicOffers.isEmpty { ContentUnavailableView("Nenhuma oferta pública", systemImage: "megaphone", description: Text("Proteja o que não troca e anuncie as outras cartas pelo detalhe da carta.")) }
+            else { ForEach(model.publicOffers) { offer in
+                HStack(spacing: 12) {
+                    CardBrowserArtwork(path: offer.artworkPath, seed: offer.definitionId.uuidString, title: offer.title, tint: offer.rarity.accentColor, cornerRadius: 13).frame(width: 70, height: 70)
+                    VStack(alignment: .leading, spacing: 4) { Text(offer.title).font(.headline).lineLimit(1); Text("@\(offer.username) · \(offer.albumName)").font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1); if offer.askingCoins > 0 { Label(offer.askingCoins.formatted(), systemImage: "yensign.circle.fill").font(.caption.bold()).foregroundStyle(YePlyTheme.accent) } }
+                    Spacer(); Button("Trocar") { tradeTargetUsername = offer.username }.buttonStyle(.borderedProminent).tint(YePlyTheme.accent)
+                }.padding(12).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
+            } }
         }
     }
 
@@ -606,17 +665,63 @@ struct CardsHubView: View {
                             coins: trade.requestedCoins ?? 0,
                             tint: .green
                         )
-                        if trade.canRespond && trade.status == "pending" {
-                            HStack {
-                                Button("Recusar", role: .destructive) { Task { await model.respond(trade, accept: false, repository: container.repository) } }.buttonStyle(.bordered)
-                                Button("Aceitar troca") { Task { await model.respond(trade, accept: true, repository: container.repository) } }.buttonStyle(.borderedProminent).tint(.green)
-                            }
-                        }
+                        Button { selectedTrade = trade } label: { Label("Inspecionar proposta", systemImage: "doc.text.magnifyingglass").frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent).tint(trade.canRespond ? YePlyTheme.accent : .gray)
                     }
                     .padding(14).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17))
                 }
             }
         }
+    }
+}
+
+private struct CardTradeInspectionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var container: AppContainer
+    let trade: CardTradeSummary
+    let respond: (Bool) -> Void
+    @State private var items: [CardTradeDetailItem] = []
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(spacing: 5) {
+                        Image(systemName: "arrow.left.arrow.right.circle.fill").font(.system(size: 48)).foregroundStyle(YePlyTheme.accent)
+                        Text("Proposta com @\(trade.counterpartyUsername)").font(.title2.bold())
+                        Text(trade.status.uppercased()).font(.caption2.bold()).tracking(1.5).foregroundStyle(YePlyTheme.secondary)
+                    }.frame(maxWidth: .infinity)
+                    tradeSide(title: "Você entrega", side: "offered", coins: trade.offeredCoins ?? 0, tint: .orange)
+                    tradeSide(title: "Você recebe", side: "requested", coins: trade.requestedCoins ?? 0, tint: .green)
+                    if trade.canRespond && trade.status == "pending" {
+                        HStack(spacing: 10) {
+                            Button("Recusar", role: .destructive) { respond(false) }.buttonStyle(.bordered).frame(maxWidth: .infinity)
+                            Button("Aceitar troca") { respond(true) }.buttonStyle(.borderedProminent).tint(.green).frame(maxWidth: .infinity)
+                        }
+                    }
+                }.padding(18).padding(.bottom, 30)
+            }
+            .navigationTitle("Detalhes da troca").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+            .task { do { items = try await container.repository.fetchTradeDetail(id: trade.id) } catch { errorMessage = error.localizedDescription } }
+            .alert("Não foi possível carregar", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") {} } message: { Text(errorMessage ?? "") }
+            .yeplyBackground()
+        }
+    }
+
+    private func tradeSide(title: String, side: String, coins: Int, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text(title).font(.headline); Spacer(); if coins > 0 { Label(coins.formatted(), systemImage: "yensign.circle.fill").font(.subheadline.bold()).foregroundStyle(tint) } }
+            let cards = items.filter { $0.side == side }
+            if cards.isEmpty { Text("Nenhuma carta").font(.caption).foregroundStyle(YePlyTheme.secondary) }
+            else { ForEach(cards) { item in
+                HStack(spacing: 11) {
+                    CardBrowserArtwork(path: item.artworkPath, seed: item.definitionId.uuidString, title: item.title, tint: item.rarity.accentColor, cornerRadius: 11).frame(width: 58, height: 58)
+                    VStack(alignment: .leading, spacing: 3) { Text(item.title).font(.subheadline.bold()); Text("\(item.artistName) · \(item.albumName)").font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1) }
+                    Spacer(); Text("#\(item.serialNumber)").font(.caption2.monospacedDigit()).foregroundStyle(YePlyTheme.tertiary)
+                }
+            } }
+        }.padding(15).background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 20)).overlay(RoundedRectangle(cornerRadius: 20).stroke(tint.opacity(0.2)))
     }
 }
 
@@ -881,13 +986,11 @@ private struct ResolvedCollectibleCard: View {
 }
 
 private struct CardCollectionListRow: View {
-    @EnvironmentObject private var container: AppContainer
     let card: CollectibleCardItem
-    @State private var artworkURL: URL?
 
     var body: some View {
         HStack(spacing: 13) {
-            artwork
+            CardBrowserArtwork(path: card.artworkPath, seed: card.definitionId.uuidString, title: card.title, tint: card.rarity.accentColor, cornerRadius: 14)
                 .frame(width: 76, height: 76)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
@@ -908,6 +1011,7 @@ private struct CardCollectionListRow: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 8) {
+                if card.isProtected == true { Image(systemName: "lock.shield.fill").foregroundStyle(YePlyTheme.accent) }
                 Text("#\(card.serialNumber.formatted(.number.grouping(.never)))")
                     .font(.caption2.monospacedDigit().bold()).foregroundStyle(YePlyTheme.secondary)
                 Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(YePlyTheme.tertiary)
@@ -924,34 +1028,23 @@ private struct CardCollectionListRow: View {
                 }
         }
         .contentShape(Rectangle())
-        .task(id: card.artworkPath) {
-            guard let path = card.artworkPath else { return }
-            artworkURL = try? await container.repository.signedCoverURL(path: path)
-        }
-    }
-
-    @ViewBuilder private var artwork: some View {
-        if let artworkURL {
-            YePlyRemoteImage(url: artworkURL) { phase in
-                if case let .success(image) = phase { image.resizable().scaledToFill() }
-                else { placeholder }
-            }
-        } else {
-            placeholder
-        }
-    }
-
-    private var placeholder: some View {
-        ZStack {
-            LinearGradient(colors: [card.rarity.accentColor.opacity(0.7), .black], startPoint: .topLeading, endPoint: .bottomTrailing)
-            Image(systemName: "music.note").font(.title2.bold()).foregroundStyle(.white.opacity(0.75))
-        }
     }
 }
 
 struct CardDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var container: AppContainer
     let card: CollectibleCardItem
+    @State private var isProtected: Bool
+    @State private var folders: [CardFolder] = []
+    @State private var isPublicOffer = false
+    @State private var askingCoins = 0
+    @State private var actionMessage: String?
+
+    init(card: CollectibleCardItem) {
+        self.card = card
+        _isProtected = State(initialValue: card.isProtected ?? false)
+    }
     var body: some View {
         ZStack {
             LinearGradient(
@@ -995,6 +1088,30 @@ struct CardDetailSheet: View {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.09)))
                     }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("ORGANIZAR E NEGOCIAR").font(.caption2.bold()).tracking(1.5).foregroundStyle(YePlyTheme.accent)
+                        Button { toggleProtection() } label: {
+                            Label(isProtected ? "Carta protegida" : "Proteger esta carta", systemImage: isProtected ? "lock.shield.fill" : "lock.shield")
+                                .frame(maxWidth: .infinity).frame(height: 48)
+                        }.buttonStyle(.bordered).tint(isProtected ? .green : YePlyTheme.accent)
+                        Menu {
+                            if folders.isEmpty { Text("Crie uma pasta na aba Pastas") }
+                            ForEach(folders) { folder in
+                                Button { toggleFolder(folder) } label: {
+                                    let contains = folder.items.contains(where: { $0.id == card.id })
+                                    Label("\(folder.emoji) \(folder.name)", systemImage: contains ? "checkmark" : "plus")
+                                }
+                            }
+                        } label: {
+                            Label("Adicionar a uma pasta", systemImage: "folder.badge.plus").frame(maxWidth: .infinity).frame(height: 48)
+                        }.buttonStyle(.bordered)
+                        HStack {
+                            TextField("Moedas pedidas", value: $askingCoins, format: .number).keyboardType(.numberPad)
+                            Button(isPublicOffer ? "Remover oferta" : "Publicar oferta") { toggleOffer() }.buttonStyle(.borderedProminent).tint(isPublicOffer ? .red : YePlyTheme.accent)
+                        }
+                        .disabled(isProtected)
+                    }.padding(16).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 38)
@@ -1008,6 +1125,12 @@ struct CardDetailSheet: View {
         }
         .toolbarBackground(.hidden, for: .navigationBar)
         .preferredColorScheme(.dark)
+        .task {
+            folders = (try? await container.repository.fetchCardFolders(profileID: nil)) ?? []
+            let offers = (try? await container.repository.fetchPublicCardOffers()) ?? []
+            if let current = offers.first(where: { $0.cardInstanceId == card.id }) { isPublicOffer = true; askingCoins = current.askingCoins }
+        }
+        .alert("Carta", isPresented: Binding(get: { actionMessage != nil }, set: { if !$0 { actionMessage = nil } })) { Button("OK") {} } message: { Text(actionMessage ?? "") }
     }
 
     private func metric(_ title: String, value: Int?, suffix: String? = nil) -> some View {
@@ -1024,6 +1147,18 @@ struct CardDetailSheet: View {
             Text(title).font(.caption2).foregroundStyle(YePlyTheme.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func toggleProtection() {
+        Task { do { _ = try await container.repository.toggleCardProtection(instanceID: card.id); isProtected.toggle(); actionMessage = isProtected ? "Carta protegida contra trocas." : "Proteção removida." } catch { actionMessage = error.localizedDescription } }
+    }
+
+    private func toggleFolder(_ folder: CardFolder) {
+        Task { do { _ = try await container.repository.toggleCardFolderItem(folderID: folder.id, instanceID: card.id); folders = (try? await container.repository.fetchCardFolders(profileID: nil)) ?? folders } catch { actionMessage = error.localizedDescription } }
+    }
+
+    private func toggleOffer() {
+        Task { do { _ = try await container.repository.togglePublicCardOffer(instanceID: card.id, askingCoins: max(0, askingCoins), note: nil); isPublicOffer.toggle(); actionMessage = isPublicOffer ? "Oferta publicada na comunidade." : "Oferta removida." } catch { actionMessage = error.localizedDescription } }
     }
 
 }
@@ -1384,11 +1519,12 @@ private struct CreatePackCodeView: View {
     }
 }
 
-private struct CreateCardTradeView: View {
+struct CreateCardTradeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     let ownCards: [CollectibleCardItem]
     let coinBalance: Int
+    let initialUsername: String?
     let onCreated: () -> Void
     @State private var username = ""
     @State private var profile: UserProfile?
@@ -1404,6 +1540,14 @@ private struct CreateCardTradeView: View {
     @State private var theirSort: CardTradeSort = .newest
     @State private var isWorking = false
     @State private var errorMessage: String?
+
+    init(ownCards: [CollectibleCardItem], coinBalance: Int, initialUsername: String? = nil, onCreated: @escaping () -> Void) {
+        self.ownCards = ownCards
+        self.coinBalance = coinBalance
+        self.initialUsername = initialUsername
+        self.onCreated = onCreated
+        _username = State(initialValue: initialUsername ?? "")
+    }
 
     var body: some View {
         NavigationStack {
@@ -1435,6 +1579,9 @@ private struct CreateCardTradeView: View {
             }
             .safeAreaInset(edge: .bottom) { tradeFooter }
             .alert("Troca", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") {} } message: { Text(errorMessage ?? "") }
+            .task(id: initialUsername) {
+                if initialUsername != nil, profile == nil { search() }
+            }
         }
     }
 

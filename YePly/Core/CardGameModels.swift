@@ -248,6 +248,7 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
     var artistCatalogSize: Int? = nil
     var convertedToCoins: Bool? = nil
     var coinsAwarded: Int? = nil
+    var isProtected: Bool? = nil
 
     var id: UUID { instanceId }
 
@@ -271,6 +272,106 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
         case artistCatalogSize = "artist_catalog_size"
         case convertedToCoins = "converted_to_coins"
         case coinsAwarded = "coins_awarded"
+        case isProtected = "is_protected"
+    }
+}
+
+struct CardFolder: Codable, Identifiable, Hashable, Sendable {
+    let folderId: UUID
+    let ownerId: UUID
+    let name: String
+    let emoji: String
+    let isPublic: Bool
+    let itemCount: Int
+    let items: [CollectibleCardItem]
+    var id: UUID { folderId }
+    enum CodingKeys: String, CodingKey {
+        case folderId = "folder_id"; case ownerId = "owner_id"; case name, emoji, items
+        case isPublic = "is_public"; case itemCount = "item_count"
+    }
+}
+
+struct CollectorProfileSummary: Codable, Hashable, Sendable {
+    let totalCards: Int
+    let uniqueCards: Int
+    let completedAlbums: Int
+    let completedTrades: Int
+    let wishlistCount: Int
+    let folderCount: Int
+    let rarestTitle: String?
+    let rarestRarity: CollectibleCardRarity?
+    enum CodingKeys: String, CodingKey {
+        case totalCards = "total_cards"; case uniqueCards = "unique_cards"
+        case completedAlbums = "completed_albums"; case completedTrades = "completed_trades"
+        case wishlistCount = "wishlist_count"; case folderCount = "folder_count"
+        case rarestTitle = "rarest_title"; case rarestRarity = "rarest_rarity"
+    }
+}
+
+struct ProfileMusicPresence: Codable, Identifiable, Hashable, Sendable {
+    let profileId: UUID
+    let trackId: UUID?
+    let title: String
+    let artistName: String
+    let albumName: String?
+    let artworkPath: String?
+    let positionSeconds: Int
+    let durationSeconds: Int
+    let isPlaying: Bool
+    let updatedAt: Date
+    var id: UUID { profileId }
+    var progress: Double { durationSeconds > 0 ? min(max(Double(positionSeconds) / Double(durationSeconds), 0), 1) : 0 }
+    enum CodingKeys: String, CodingKey {
+        case profileId = "profile_id"; case trackId = "track_id"; case title
+        case artistName = "artist_name"; case albumName = "album_name"; case artworkPath = "artwork_path"
+        case positionSeconds = "position_seconds"; case durationSeconds = "duration_seconds"
+        case isPlaying = "is_playing"; case updatedAt = "updated_at"
+    }
+}
+
+struct CardPublicOffer: Codable, Identifiable, Hashable, Sendable {
+    let offerId: UUID
+    let ownerId: UUID
+    let username: String
+    let displayName: String
+    let avatarPath: String?
+    let cardInstanceId: UUID
+    let serialNumber: Int
+    let definitionId: UUID
+    let title: String
+    let artistName: String
+    let albumName: String
+    let artworkPath: String?
+    let rarity: CollectibleCardRarity
+    let askingCoins: Int
+    let note: String?
+    let createdAt: Date
+    var id: UUID { offerId }
+    enum CodingKeys: String, CodingKey {
+        case offerId = "offer_id"; case ownerId = "owner_id"; case username
+        case displayName = "display_name"; case avatarPath = "avatar_path"
+        case cardInstanceId = "card_instance_id"; case serialNumber = "serial_number"
+        case definitionId = "definition_id"; case title; case artistName = "artist_name"
+        case albumName = "album_name"; case artworkPath = "artwork_path"; case rarity
+        case askingCoins = "asking_coins"; case note; case createdAt = "created_at"
+    }
+}
+
+struct CardTradeDetailItem: Codable, Identifiable, Hashable, Sendable {
+    let side: String
+    let instanceId: UUID
+    let serialNumber: Int
+    let definitionId: UUID
+    let title: String
+    let artistName: String
+    let albumName: String
+    let artworkPath: String?
+    let rarity: CollectibleCardRarity
+    var id: UUID { instanceId }
+    enum CodingKeys: String, CodingKey {
+        case side; case instanceId = "instance_id"; case serialNumber = "serial_number"
+        case definitionId = "definition_id"; case title; case artistName = "artist_name"
+        case albumName = "album_name"; case artworkPath = "artwork_path"; case rarity
     }
 }
 

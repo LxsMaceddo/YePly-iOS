@@ -323,21 +323,55 @@ struct PublicProfileView: View {
     @State private var equippedBadges: [EquippedAlbumBadge] = []
     @State private var ownedBadgeCount = 0
     @State private var featuredCard: CollectibleCardItem?
+    @State private var backgroundURL: URL?
+    @State private var collector: CollectorProfileSummary?
+    @State private var presence: ProfileMusicPresence?
+    @State private var wishlist: [CardWishlistItem] = []
+    @State private var folders: [CardFolder] = []
+    @State private var ownCards: [CollectibleCardItem] = []
+    @State private var ownCoinBalance = 0
+    @State private var showingTrade = false
+    @State private var scrollOffset: CGFloat = 0
     @State private var errorMessage: String?
 
     init(profile: UserProfile) { _current = State(initialValue: profile) }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                SocialAvatarView(profile: current, size: 112).padding(.top, 24)
+        GeometryReader { viewport in
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
+                PublicProfileBackdrop(url: backgroundURL)
+                    .frame(width: viewport.size.width, height: 520)
+                    .ignoresSafeArea(edges: .top)
+                    .opacity(Double(max(0, min(1, 1 + scrollOffset / 340))))
+                ScrollView {
+                    VStack(spacing: 20) {
+                Color.clear.frame(height: backgroundURL == nil ? 8 : 142)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: PublicProfileScrollOffsetKey.self, value: proxy.frame(in: .named("publicProfileScroll")).minY)
+                        }
+                    }
+                SocialAvatarView(profile: current, size: 112)
+                    .overlay(Circle().stroke(.white.opacity(0.8), lineWidth: 3))
                 VStack(spacing: 5) {
-                    Text(current.displayName).font(.title2.bold())
+                    HStack(spacing: 7) {
+                        Text(current.displayName).font(.title2.bold())
+                        if current.role == .admin { Image(systemName: "checkmark.seal.fill").foregroundStyle(YePlyTheme.accent) }
+                    }
                     Text("@\(current.username)").foregroundStyle(YePlyTheme.secondary)
                 }
                 if current.id != session.userID {
-                    FollowButton(isFollowing: current.isFollowed ?? false) { Task { await toggleFollow() } }
+                    HStack(spacing: 10) {
+                        FollowButton(isFollowing: current.isFollowed ?? false) { Task { await toggleFollow() } }
+                        Button { showingTrade = true } label: {
+                            Label("Propor troca", systemImage: "arrow.left.arrow.right")
+                                .font(.subheadline.bold()).foregroundStyle(.black)
+                                .padding(.horizontal, 15).frame(height: 42).background(YePlyTheme.accent, in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
                 }
+                if let presence { PublicProfilePresencePanel(presence: presence) }
                 if !equippedBadges.isEmpty {
                     ProfileBadgeShowcase(badges: equippedBadges)
                 }
@@ -349,6 +383,11 @@ struct PublicProfileView: View {
                     socialMetric(current.followingCount ?? 0, "Seguindo")
                     socialMetric(max(ownedBadgeCount, current.ownedBadgeCount ?? 0), "Badges")
                 }
+                if let collector { PublicCollectorPanel(summary: collector) }
+                if !wishlist.isEmpty {
+                    PublicWishlistPanel(items: wishlist) { showingTrade = true }
+                }
+                if !folders.isEmpty { PublicFoldersPanel(folders: folders) }
                 if let bio = current.bio, !bio.isEmpty {
                     Text(bio).font(.subheadline).foregroundStyle(YePlyTheme.secondary).multilineTextAlignment(.center).padding(16)
                         .frame(maxWidth: .infinity).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16))
@@ -362,8 +401,13 @@ struct PublicProfileView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                    }
+                    .padding(.horizontal, 18).padding(.bottom, 40)
+                    .frame(width: viewport.size.width)
+                }
+                .coordinateSpace(name: "publicProfileScroll")
+                .onPreferenceChange(PublicProfileScrollOffsetKey.self) { scrollOffset = $0 }
             }
-            .padding(.horizontal, 18).padding(.bottom, 40)
         }
         .navigationTitle(current.displayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -373,14 +417,32 @@ struct PublicProfileView: View {
                 async let badges = container.repository.fetchEquippedCardBadges(profileID: current.id)
                 async let allBadges = container.repository.fetchOwnedProfileBadges(profileID: current.id)
                 async let featured = container.repository.fetchFeaturedProfileCard(profileID: current.id)
+                async let collectorRequest = container.repository.fetchCollectorProfile(profileID: current.id)
+                async let presenceRequest = container.repository.fetchProfileMusicPresence(profileID: current.id)
+                async let wishlistRequest = container.repository.fetchUserWishlist(username: current.username)
+                async let foldersRequest = container.repository.fetchCardFolders(profileID: current.id)
                 current = try await profile
                 equippedBadges = try await badges
                 ownedBadgeCount = (try? await allBadges)?.count ?? current.ownedBadgeCount ?? equippedBadges.count
                 featuredCard = try? await featured
+                collector = try? await collectorRequest
+                presence = try? await presenceRequest
+                wishlist = (try? await wishlistRequest) ?? []
+                folders = (try? await foldersRequest) ?? []
+                if let path = current.backgroundPath { backgroundURL = try? await container.repository.signedAvatarURL(path: path) }
+                if current.id != session.userID {
+                    async let cards = container.repository.fetchCardInventory()
+                    async let dashboard = container.repository.fetchCardDashboard()
+                    ownCards = (try? await cards) ?? []
+                    ownCoinBalance = (try? await dashboard)?.coinBalance ?? 0
+                }
             }
             catch { errorMessage = error.localizedDescription }
         }
         .alert("Não foi possível carregar", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+        .sheet(isPresented: $showingTrade) {
+            CreateCardTradeView(ownCards: ownCards, coinBalance: ownCoinBalance, initialUsername: current.username, onCreated: {})
+        }
         .yeplyBackground()
     }
 
@@ -396,6 +458,105 @@ struct PublicProfileView: View {
             current.isFollowed = followed
             current.followerCount = max(0, (current.followerCount ?? 0) + (followed && !previous ? 1 : !followed && previous ? -1 : 0))
         } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct PublicProfileScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct PublicProfileBackdrop: View {
+    let url: URL?
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(colors: [YePlyTheme.accentSoft.opacity(0.55), .black], startPoint: .topLeading, endPoint: .bottom)
+                if let url {
+                    ProfileMediaImage(url: url).frame(width: proxy.size.width, height: proxy.size.height)
+                }
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(0.25), location: 0.55), .init(color: .black, location: 1)], startPoint: .top, endPoint: .bottom)
+            }.clipped()
+        }
+    }
+}
+
+private struct PublicProfilePresencePanel: View {
+    let presence: ProfileMusicPresence
+    var body: some View {
+        HStack(spacing: 13) {
+            CardBrowserArtwork(path: presence.artworkPath, seed: presence.trackId?.uuidString ?? presence.title, title: presence.title, tint: YePlyTheme.accent, cornerRadius: 13)
+                .frame(width: 58, height: 58)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    NowPlayingBars(isPlaying: presence.isPlaying)
+                    Text(presence.isPlaying ? "OUVINDO AGORA" : "OUVIU RECENTEMENTE").font(.caption2.bold()).tracking(1.2).foregroundStyle(YePlyTheme.accent)
+                }
+                Text(presence.title).font(.subheadline.bold()).lineLimit(1)
+                Text("\(presence.artistName) · \(time(presence.positionSeconds))").font(.caption).foregroundStyle(YePlyTheme.secondary)
+                ProgressView(value: presence.progress).tint(YePlyTheme.accent)
+            }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+    private func time(_ seconds: Int) -> String { "\(seconds / 60):\(String(format: "%02d", seconds % 60))" }
+}
+
+private struct NowPlayingBars: View {
+    let isPlaying: Bool
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.32, paused: !isPlaying)) { context in
+            let phase = Int(context.date.timeIntervalSinceReferenceDate * 3)
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(0..<4, id: \.self) { index in
+                    Capsule().fill(YePlyTheme.accent).frame(width: 3, height: CGFloat(5 + ((phase + index * 3) % 4) * 3))
+                }
+            }.frame(width: 18, height: 16)
+        }
+    }
+}
+
+private struct PublicCollectorPanel: View {
+    let summary: CollectorProfileSummary
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Perfil de colecionador", systemImage: "sparkles.rectangle.stack.fill").font(.headline)
+            HStack { metric(summary.totalCards, "cartas"); metric(summary.uniqueCards, "únicas"); metric(summary.completedAlbums, "álbuns"); metric(summary.completedTrades, "trocas") }
+            if let title = summary.rarestTitle { Text("Destaque raro: \(title)").font(.caption).foregroundStyle(YePlyTheme.secondary) }
+        }.padding(16).background(YePlyTheme.elevated.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
+    }
+    private func metric(_ value: Int, _ label: String) -> some View { VStack { Text(value.formatted()).font(.headline.bold()); Text(label).font(.caption2).foregroundStyle(YePlyTheme.secondary) }.frame(maxWidth: .infinity) }
+}
+
+private struct PublicWishlistPanel: View {
+    let items: [CardWishlistItem]
+    let proposeTrade: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Label("Cartas desejadas", systemImage: "heart.fill").font(.headline); Spacer(); Button("Oferecer", action: proposeTrade).font(.caption.bold()) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) { ForEach(items.prefix(12)) { item in
+                    VStack(alignment: .leading, spacing: 5) {
+                        CardBrowserArtwork(path: item.artworkPath, seed: item.definitionId.uuidString, title: item.title, tint: item.rarity.accentColor, cornerRadius: 12).frame(width: 92, height: 92)
+                        Text(item.title).font(.caption.bold()).lineLimit(1).frame(width: 92, alignment: .leading)
+                    }
+                } }
+            }
+        }.padding(16).background(YePlyTheme.elevated.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+private struct PublicFoldersPanel: View {
+    let folders: [CardFolder]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Pastas públicas", systemImage: "folder.fill").font(.headline)
+            ForEach(folders) { folder in
+                HStack { Text(folder.emoji).font(.title2); VStack(alignment: .leading) { Text(folder.name).font(.subheadline.bold()); Text("\(folder.itemCount) cartas").font(.caption).foregroundStyle(YePlyTheme.secondary) }; Spacer(); Image(systemName: "chevron.right") }
+                    .padding(12).background(YePlyTheme.elevatedStrong, in: RoundedRectangle(cornerRadius: 15))
+            }
+        }.padding(16).background(YePlyTheme.elevated.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 

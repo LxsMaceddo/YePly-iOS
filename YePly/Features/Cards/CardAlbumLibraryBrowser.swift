@@ -290,11 +290,16 @@ private struct CardArtistAlbumsSheet: View {
     }
 
     private func cardsForAlbum(_ album: CardAlbumProgress) -> [CollectibleCardItem] {
-        let artistKey = CardBrowserNormalization.key(album.artistName)
+        let definitionIDs = Set(catalogForAlbum(album).map(\.definitionId))
+        let byDefinition = cards.filter { definitionIDs.contains($0.definitionId) }
+        if !byDefinition.isEmpty { return byDefinition }
+
+        // Artist labels on collaborative tracks can be "Kanye West, Ye" while
+        // the album owner is simply "Kanye West". Album identity is stable;
+        // comparing the full artist string made owned cards look locked.
         let albumKey = CardBrowserNormalization.key(album.albumTitle)
         return cards.filter {
-            CardBrowserNormalization.key($0.artistName) == artistKey
-                && CardBrowserNormalization.key($0.albumName) == albumKey
+            CardBrowserNormalization.key($0.albumName) == albumKey
         }
     }
 
@@ -504,13 +509,14 @@ private struct CardAlbumCollectionDetail: View {
 
     private var completeTrackRows: [CardAlbumCompleteTrackRow] {
         let groups = Dictionary(uniqueKeysWithValues: ownedGroups.map { ($0.card.definitionId, $0) })
+        let groupsByTitle = Dictionary(grouping: ownedGroups, by: { CardBrowserNormalization.key($0.card.title) })
         var result = catalog.map { item in
             CardAlbumCompleteTrackRow(
                 id: item.definitionId,
                 trackNumber: item.trackNumber,
                 discNumber: item.discNumber ?? 1,
                 catalog: item,
-                owned: groups[item.definitionId]
+                owned: groups[item.definitionId] ?? groupsByTitle[CardBrowserNormalization.key(item.title)]?.first
             )
         }
         let catalogIDs = Set(catalog.map(\.definitionId))

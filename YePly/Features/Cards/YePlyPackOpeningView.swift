@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Resolve a capa da carta durante a revelação. Para capas do Supabase, passe
 /// `container.repository.signedCoverURL(path:)` na integração.
@@ -24,6 +25,7 @@ struct YePlyPackOpeningView: View {
     @State private var tearProgress = 0.0
     @State private var dragStarted = false
     @State private var revealIndex = 0
+    @State private var foilSweep = false
 
     var body: some View {
         ZStack {
@@ -40,6 +42,7 @@ struct YePlyPackOpeningView: View {
                 summaryView
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if stage == .tearing, !reduceMotion { PackTearBurst(progress: tearProgress).allowsHitTesting(false) }
         }
         .safeAreaInset(edge: .top) { topBar }
         .preferredColorScheme(.dark)
@@ -91,7 +94,14 @@ struct YePlyPackOpeningView: View {
             )
             .frame(maxWidth: 280)
             .scaleEffect(dragStarted && !reduceMotion ? 1.025 : 1)
+            .rotation3DEffect(.degrees(reduceMotion ? 0 : (tearProgress * 5 - 2.5)), axis: (x: 0.15, y: 1, z: 0))
+            .shadow(color: YePlyTheme.accent.opacity(0.28 + tearProgress * 0.32), radius: 28, y: 18)
+            .overlay {
+                LinearGradient(colors: [.clear, .white.opacity(0.24), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .rotationEffect(.degrees(18)).offset(x: foilSweep ? 300 : -300).blendMode(.screen).clipped()
+            }
             .gesture(tearGesture)
+            .onAppear { withAnimation(.linear(duration: 1.7).repeatForever(autoreverses: false)) { foilSweep = true } }
 
             VStack(spacing: 7) {
                 Label("Deslize para rasgar", systemImage: "hand.draw.fill")
@@ -226,6 +236,7 @@ struct YePlyPackOpeningView: View {
 
     private func openPack() {
         guard stage == .sealed else { return }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         stage = .tearing
         withAnimation(.easeIn(duration: reduceMotion ? 0.05 : 0.42)) {
             tearProgress = 1
@@ -243,6 +254,7 @@ struct YePlyPackOpeningView: View {
     }
 
     private func advanceReveal() {
+        UISelectionFeedbackGenerator().selectionChanged()
         if revealIndex + 1 < cards.count {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
                 revealIndex += 1
@@ -280,6 +292,27 @@ struct YePlyPackOpeningView: View {
     static func defaultArtworkResolver(for card: CollectibleCardItem) async -> URL? {
         guard let path = card.artworkPath else { return nil }
         return URL(string: path)
+    }
+}
+
+private struct PackTearBurst: View {
+    let progress: Double
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                ForEach(0..<22, id: \.self) { index in
+                    let angle = Double(index) / 22 * Double.pi * 2
+                    let distance = CGFloat(45 + (index % 5) * 18) * CGFloat(progress)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(index.isMultiple(of: 3) ? YePlyTheme.accent : .white.opacity(0.82))
+                        .frame(width: CGFloat(3 + index % 4), height: CGFloat(9 + index % 7))
+                        .rotationEffect(.radians(angle + progress * 4))
+                        .offset(x: CGFloat(cos(angle)) * distance, y: CGFloat(sin(angle)) * distance)
+                        .opacity(max(0, 1 - progress * 0.72))
+                }
+                Circle().stroke(YePlyTheme.accent.opacity(1 - progress), lineWidth: 3).frame(width: 80 + 180 * CGFloat(progress), height: 80 + 180 * CGFloat(progress))
+            }.position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+        }.ignoresSafeArea()
     }
 }
 

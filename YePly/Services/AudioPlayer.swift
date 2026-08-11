@@ -47,8 +47,10 @@ final class AudioPlayer: ObservableObject {
     private var waveformTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
     private var cardListeningTask: Task<Void, Never>?
+    private var presenceTask: Task<Void, Never>?
     private var cardListeningSeconds: Double = 0
     private var lastReportedCardListeningSeconds = 0
+    private var lastPresenceReportedSecond = -15
 
     init(offlineLibrary: OfflineLibraryStore) {
         self.offlineLibrary = offlineLibrary
@@ -67,6 +69,7 @@ final class AudioPlayer: ObservableObject {
         waveformTask?.cancel()
         historyTask?.cancel()
         cardListeningTask?.cancel()
+        presenceTask?.cancel()
     }
 
     var currentIndex: Int? {
@@ -158,6 +161,7 @@ final class AudioPlayer: ObservableObject {
         if isPlaying { player?.pause() } else { player?.play() }
         isPlaying.toggle()
         updateNowPlaying(elapsed: elapsedTime)
+        reportMusicPresence(force: true)
     }
 
     func seek(to fraction: Double) {
@@ -230,6 +234,7 @@ final class AudioPlayer: ObservableObject {
                 }
             }
             updateNowPlaying()
+            reportMusicPresence(force: true)
             loadNowPlayingArtwork()
             loadWaveform(for: track, url: url)
             if offlineLibrary.isConnected {
@@ -260,6 +265,8 @@ final class AudioPlayer: ObservableObject {
         currentTrack = track
         cardListeningSeconds = 0
         lastReportedCardListeningSeconds = 0
+        lastPresenceReportedSecond = -15
+        presenceTask?.cancel()
         cardListeningTask?.cancel()
         currentWaveform = track.waveformSamples?.isEmpty == false ? track.waveformSamples! : fallbackWaveform(for: track.id)
         duration = track.durationSeconds
@@ -282,6 +289,7 @@ final class AudioPlayer: ObservableObject {
                     self.cardListeningSeconds += 0.5
                     self.reportCardListeningIfNeeded()
                 }
+                self.reportMusicPresence()
                 if self.fadeDuration > 0, self.hasNext, self.isPlaying {
                     let remaining = max(0, self.duration - seconds)
                     if remaining <= self.fadeDuration {
@@ -308,6 +316,7 @@ final class AudioPlayer: ObservableObject {
                 } else {
                     self.isPlaying = false
                     self.updateNowPlaying(elapsed: self.duration)
+                    self.reportMusicPresence(force: true)
                 }
             }
         }
@@ -331,6 +340,27 @@ final class AudioPlayer: ObservableObject {
                     self?.cardRewardMessage = reward.message ?? "Nova conquista: \(achievementKey)."
                 }
             } catch { }
+        }
+    }
+
+    private func reportMusicPresence(force: Bool = false) {
+        guard offlineLibrary.isConnected, let track = currentTrack, let repository else { return }
+        let second = Int(elapsedTime)
+        guard force || second >= lastPresenceReportedSecond + 15 else { return }
+        guard presenceTask == nil else { return }
+        lastPresenceReportedSecond = second
+        let artworkPath = currentArtworkPath
+        let durationSeconds = Int(max(duration, track.durationSeconds))
+        let playing = isPlaying
+        presenceTask = Task { [weak self] in
+            defer { self?.presenceTask = nil }
+            try? await repository.updateProfileMusicPresence(
+                track: track,
+                artworkPath: artworkPath,
+                positionSeconds: second,
+                durationSeconds: durationSeconds,
+                isPlaying: playing
+            )
         }
     }
 

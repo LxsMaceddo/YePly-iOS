@@ -81,6 +81,18 @@ protocol MusicRepository: Sendable {
     func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult
     func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID
     func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult
+    func fetchTradeDetail(id: UUID) async throws -> [CardTradeDetailItem]
+    func toggleCardProtection(instanceID: UUID) async throws -> CardRewardResult
+    func fetchCardFolders(profileID: UUID?) async throws -> [CardFolder]
+    func createCardFolder(name: String, emoji: String, isPublic: Bool) async throws -> UUID
+    func deleteCardFolder(id: UUID) async throws -> Bool
+    func toggleCardFolderItem(folderID: UUID, instanceID: UUID) async throws -> CardRewardResult
+    func fetchUserWishlist(username: String) async throws -> [CardWishlistItem]
+    func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary?
+    func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence?
+    func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws
+    func fetchPublicCardOffers() async throws -> [CardPublicOffer]
+    func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult
     func refreshCardRarities() async throws -> CardRewardResult
@@ -346,6 +358,18 @@ actor DemoMusicRepository: MusicRepository {
     func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult { demoReward("Pack de conquista recebido.") }
     func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID { UUID() }
     func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult { demoReward(accept ? "Troca concluída." : "Troca recusada.") }
+    func fetchTradeDetail(id: UUID) async throws -> [CardTradeDetailItem] { [] }
+    func toggleCardProtection(instanceID: UUID) async throws -> CardRewardResult { demoReward("Proteção atualizada.") }
+    func fetchCardFolders(profileID: UUID?) async throws -> [CardFolder] { [] }
+    func createCardFolder(name: String, emoji: String, isPublic: Bool) async throws -> UUID { UUID() }
+    func deleteCardFolder(id: UUID) async throws -> Bool { true }
+    func toggleCardFolderItem(folderID: UUID, instanceID: UUID) async throws -> CardRewardResult { demoReward(nil) }
+    func fetchUserWishlist(username: String) async throws -> [CardWishlistItem] { [] }
+    func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary? { nil }
+    func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence? { nil }
+    func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws {}
+    func fetchPublicCardOffers() async throws -> [CardPublicOffer] { [] }
+    func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult { demoReward(nil) }
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult { demoReward("Conquista Show Off atualizada.") }
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult { demoReward("Catálogo sincronizado.") }
     func refreshCardRarities() async throws -> CardRewardResult { demoReward("Raridades recalculadas.") }
