@@ -26,6 +26,7 @@ struct ProfileView: View {
     @State private var folders: [CardFolder] = []
     @State private var marketOffers: [CardPublicOffer] = []
     @State private var profileScrollOffset: CGFloat = 0
+    @State private var isRefreshingProfile = false
 
     var body: some View {
         GeometryReader { viewport in
@@ -114,7 +115,6 @@ struct ProfileView: View {
         .task(id: session.profile?.id) {
             await refreshSocialProfile()
         }
-        .onAppear { Task { await refreshSocialProfile() } }
         .confirmationDialog("Sair do YePly?", isPresented: $showingSignOut, titleVisibility: .visible) {
             Button("Sair", role: .destructive) { Task { await session.signOut() } }
             Button("Cancelar", role: .cancel) {}
@@ -229,8 +229,11 @@ struct ProfileView: View {
         ByteCountFormatter.string(fromByteCount: offlineLibrary.downloadedSizeBytes, countStyle: .file)
     }
 
-    private func refreshSocialProfile() async {
+    @MainActor private func refreshSocialProfile() async {
         guard offlineLibrary.isConnected, let id = session.profile?.id else { return }
+        guard !isRefreshingProfile else { return }
+        isRefreshingProfile = true
+        defer { isRefreshingProfile = false }
         async let profileRequest = container.repository.fetchProfile(id: id)
         async let equippedRequest = container.repository.fetchEquippedCardBadges(profileID: id)
         async let ownedRequest = container.repository.fetchOwnedProfileBadges(profileID: id)
@@ -377,16 +380,45 @@ struct ProfileMediaImage: View {
     }
 
     private static func decode(_ data: Data) -> UIImage? {
-        guard data.isGIF, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return UIImage(data: data) }
-        let count = CGImageSourceGetCount(source)
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+        ) else { return nil }
+
+        let maximumPixelSize = data.isGIF ? 720 : 1_440
+        let thumbnailOptions: CFDictionary = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary
+
+        guard data.isGIF else {
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else { return nil }
+            return UIImage(cgImage: thumbnail)
+        }
+
+        let sourceFrameCount = CGImageSourceGetCount(source)
+        guard sourceFrameCount > 0 else { return nil }
+
+        // A GIF de perfil pode ter centenas de quadros em resolucao alta. Manter
+        // todos eles descompactados fecha o app por pressao de memoria. Amostramos
+        // no maximo 24 quadros ja redimensionados, preservando a animacao sem
+        // ultrapassar o orcamento de memoria de iPhones com pouca RAM.
+        let maximumFrames = 24
+        let frameStep = max(1, Int(ceil(Double(sourceFrameCount) / Double(maximumFrames))))
         var images: [UIImage] = []
         var duration = 0.0
-        for index in 0..<count {
-            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+        images.reserveCapacity(min(sourceFrameCount, maximumFrames))
+        for index in stride(from: 0, to: sourceFrameCount, by: frameStep) {
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, index, thumbnailOptions) else { continue }
             images.append(UIImage(cgImage: cgImage))
             let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
             let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-            duration += (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0.1
+            let frameDelay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double)
+                ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double)
+                ?? 0.1
+            duration += max(0.02, frameDelay) * Double(frameStep)
         }
         return images.count > 1 ? UIImage.animatedImage(with: images, duration: max(duration, 0.1)) : images.first
     }

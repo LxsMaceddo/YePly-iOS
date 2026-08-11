@@ -30,6 +30,21 @@ const canonicalReleaseDates = new Map<string, string>([
   ["0k7ALIqqds5oGFtpMsaHLK", "2024-02-10"],
   ["5RV2TNyjylqWJNxQyHBTeJ", "2024-08-03"],
   ["3hwveWhYFxGDLy6K6xlwFh", "2026-06-19"],
+  ["40ucxnGO51wcTGNI6xge6z", "2011-05-09"],
+  ["40QTqOBBxCEIQlLNdSjFQB", "2013-04-01"],
+  ["621OhgnZJ7Pz8iUazct1In", "2015-04-13"],
+  ["2nkto6YNI4rUYTLqEwWJ3o", "2017-07-21"],
+  ["5zi7WsKlIiUXv09tbGLKsE", "2019-05-17"],
+  ["5iUwaD3wFVwfaAfs9Z0eCh", "2020-01-25"],
+  ["1GG6U2SSJPHO6XsFiBzxYv", "2023-03-31"],
+  ["3pj1ebiwii7X06BNZglObJ", "2024-10-28"],
+  ["66dOCZnzAEgxWpG8DVjoUv", "2025-07-20"],
+  ["3RYdEXhGHojkTILUdtnRVJ", "2011-01-01"],
+  ["68j4AeI3JdszaZ7mhCh4Yo", "2012-01-01"],
+  ["392p3shh2jkxUxY2VHvlH8", "2012-07-10"],
+  ["3mH6qwIy9crq0I9YQbOuDf", "2016-08-20"],
+  ["6OGzmhzHcjf0uN9j7dYvZH", "2017-03-10"],
+  ["71VX8yv9T2hNIYVZJVUWVp", "2019-11-02"],
 ]);
 
 type KnownAlbum = {
@@ -79,6 +94,41 @@ const knownArtists: KnownArtist[] = [
       { releaseGroupMBID: "c4d999c3-983d-4149-8580-9ccb4567a12a", spotifyAlbumID: "0k7ALIqqds5oGFtpMsaHLK", title: "VULTURES 1", expectedTrackCount: 16 },
       { releaseGroupMBID: "d69250da-c94d-436d-bacf-7e52da48bc68", spotifyAlbumID: "5RV2TNyjylqWJNxQyHBTeJ", title: "VULTURES 2", expectedTrackCount: 16 },
       { spotifyAlbumID: "3hwveWhYFxGDLy6K6xlwFh", title: "BULLY - DELUXE", expectedTrackCount: 20 },
+    ],
+  },
+  {
+    musicBrainzID: "f6beac20-5dfe-4d1f-ae02-0b0a740aafd6",
+    appleMusicID: "420368335",
+    primarySpotifyID: "4V8LLVI7PbaPR0K2TGSxFF",
+    spotifyIDs: ["4V8LLVI7PbaPR0K2TGSxFF"],
+    displayName: "Tyler, The Creator",
+    aliases: ["tyler, the creator", "tyler the creator", "tyler"],
+    albums: [
+      { spotifyAlbumID: "40ucxnGO51wcTGNI6xge6z", title: "Goblin", expectedTrackCount: 18 },
+      { spotifyAlbumID: "40QTqOBBxCEIQlLNdSjFQB", title: "Wolf", expectedTrackCount: 18 },
+      { spotifyAlbumID: "621OhgnZJ7Pz8iUazct1In", title: "Cherry Bomb", expectedTrackCount: 13 },
+      { spotifyAlbumID: "2nkto6YNI4rUYTLqEwWJ3o", title: "Flower Boy", expectedTrackCount: 14 },
+      { spotifyAlbumID: "5zi7WsKlIiUXv09tbGLKsE", title: "IGOR", expectedTrackCount: 12 },
+      { spotifyAlbumID: "5iUwaD3wFVwfaAfs9Z0eCh", title: "BEST INTEREST", expectedTrackCount: 1 },
+      { spotifyAlbumID: "1GG6U2SSJPHO6XsFiBzxYv", title: "CALL ME IF YOU GET LOST: The Estate Sale", expectedTrackCount: 24 },
+      { spotifyAlbumID: "3pj1ebiwii7X06BNZglObJ", title: "CHROMAKOPIA +", expectedTrackCount: 15 },
+      { spotifyAlbumID: "66dOCZnzAEgxWpG8DVjoUv", title: "DON'T TAP THE GLASS", expectedTrackCount: 10 },
+    ],
+  },
+  {
+    musicBrainzID: "e520459c-dff4-491d-a6e4-c97be35e0044",
+    appleMusicID: "442122051",
+    primarySpotifyID: "2h93pZq0e7k5yf4dywlkpM",
+    spotifyIDs: ["2h93pZq0e7k5yf4dywlkpM"],
+    displayName: "Frank Ocean",
+    aliases: ["frank ocean", "frank"],
+    albums: [
+      { spotifyAlbumID: "3RYdEXhGHojkTILUdtnRVJ", title: "Novacane", expectedTrackCount: 1 },
+      { spotifyAlbumID: "68j4AeI3JdszaZ7mhCh4Yo", title: "Thinkin Bout You", expectedTrackCount: 1 },
+      { spotifyAlbumID: "392p3shh2jkxUxY2VHvlH8", title: "channel ORANGE", expectedTrackCount: 17 },
+      { spotifyAlbumID: "3mH6qwIy9crq0I9YQbOuDf", title: "Blonde", expectedTrackCount: 17 },
+      { spotifyAlbumID: "6OGzmhzHcjf0uN9j7dYvZH", title: "Chanel", expectedTrackCount: 1 },
+      { spotifyAlbumID: "71VX8yv9T2hNIYVZJVUWVp", title: "In My Room", expectedTrackCount: 1 },
     ],
   },
 ];
@@ -334,6 +384,8 @@ function shouldImportDiscoveredAlbum(album: SpotifyAlbumSummary, artist: KnownAr
   if (key.startsWith("bully") && !key.includes("deluxe")) return false;
   if (key.startsWith("watch the throne") && !key.includes("deluxe")) return false;
   if (key.startsWith("donda") && !key.includes("deluxe") && !key.startsWith("donda 2")) return false;
+  if (key === "chromakopia" && artist.albums.some((item) => albumKey(item.title) === "chromakopia +")) return false;
+  if (key === "call me if you get lost" && artist.albums.some((item) => albumKey(item.title).includes("estate sale"))) return false;
   return true;
 }
 
@@ -389,7 +441,7 @@ function chooseDiscoveredAlbums(items: SpotifyAlbumSummary[], artist: KnownArtis
     .slice(0, Math.max(0, 60 - artist.albums.length));
 }
 
-function importedSpotifyAlbum(album: SpotifyAlbum, known?: KnownAlbum): ImportedAlbum {
+function importedSpotifyAlbum(album: SpotifyAlbum, known?: KnownAlbum, fallbackArtistName = "Artista") : ImportedAlbum {
   if (!album.id || !album.name) throw new Error("spotify_album_missing_identity");
   const art = artworkURL(album.images);
   if (!art) throw new Error(`spotify_album_artwork_missing:${album.name}`);
@@ -399,7 +451,7 @@ function importedSpotifyAlbum(album: SpotifyAlbum, known?: KnownAlbum): Imported
     return [{
       spotify_track_id: track.id,
       title: track.name.trim(),
-      artist_name: credits || "Kanye West",
+      artist_name: credits || fallbackArtistName,
       duration_ms: Math.max(0, Math.min(track.duration_ms ?? 0, 7_200_000)),
       disc_number: Math.max(1, Math.min(track.disc_number ?? 1, 99)),
       track_number: Math.max(1, Math.min(track.track_number ?? 1, 999)),
@@ -601,7 +653,7 @@ Deno.serve(async (request) => {
     let musicBrainzMatches = 0;
     for (const candidate of candidates) {
       const spotifyAlbum = await fetchSpotifyAlbum(candidate.id, spotifyToken);
-      const imported = importedSpotifyAlbum(spotifyAlbum, candidate.known);
+      const imported = importedSpotifyAlbum(spotifyAlbum, candidate.known, artist.displayName);
       if (candidate.known?.releaseGroupMBID) {
         try {
           const reference = await fetchMusicBrainzReference(candidate.known);
