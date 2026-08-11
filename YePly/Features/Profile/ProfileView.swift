@@ -21,6 +21,10 @@ struct ProfileView: View {
     @State private var equippedBadges: [EquippedAlbumBadge] = []
     @State private var ownedBadgeCount = 0
     @State private var featuredCard: CollectibleCardItem?
+    @State private var collector: CollectorProfileSummary?
+    @State private var wishlist: [CardWishlistItem] = []
+    @State private var folders: [CardFolder] = []
+    @State private var marketOffers: [CardPublicOffer] = []
     @State private var profileScrollOffset: CGFloat = 0
 
     var body: some View {
@@ -28,8 +32,7 @@ struct ProfileView: View {
             ZStack(alignment: .top) {
                 Color.black.ignoresSafeArea()
                 ProfileHeroBackdrop(url: backgroundURL)
-                    .frame(width: viewport.size.width, height: 565)
-                    .offset(y: -1)
+                    .frame(width: viewport.size.width, height: viewport.size.height)
                     .ignoresSafeArea(edges: .top)
                     .opacity(Double(max(0, min(1, 1 + profileScrollOffset / 360))))
                 ScrollView(.vertical) {
@@ -52,6 +55,11 @@ struct ProfileView: View {
                         ProfileFeaturedCardPanel(card: featuredCard)
                     }
 
+                    if let collector { PublicCollectorPanel(summary: collector) }
+                    ProfileMarketPanel(offers: marketOffers, isOwner: true) { await refreshSocialProfile() }
+                    PublicWishlistPanel(items: wishlist)
+                    PublicFoldersPanel(folders: folders)
+
                     if let tastes = session.profile?.tastes, !tastes.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("Seus estilos musicais", systemImage: "heart.fill")
@@ -72,48 +80,6 @@ struct ProfileView: View {
                         ProfileMetric(value: "\(offlineLibrary.downloadedPlaylistCount)", label: "Playlists offline", icon: "arrow.down.circle.fill")
                         ProfileMetric(value: formattedOfflineSize, label: "No aparelho", icon: "internaldrive.fill")
                     }
-
-                    VStack(spacing: 0) {
-                        if session.isAdmin {
-                            NavigationLink { AdminDashboardView() } label: {
-                                ProfileRow(icon: "slider.horizontal.3", title: "Administração", subtitle: "Catálogo, uploads e artistas verificados")
-                            }
-                            .buttonStyle(.plain)
-                            Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        }
-                        NavigationLink { PlaybackHistoryView() } label: {
-                            ProfileRow(icon: "clock.arrow.circlepath", title: "Histórico de reprodução", subtitle: "Veja tudo que você ouviu")
-                        }
-                        .buttonStyle(.plain)
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        NavigationLink { PlaybackSettingsView() } label: {
-                            ProfileRow(icon: "slider.horizontal.3", title: "Configurações de reprodução", subtitle: "Sem atraso, fade in e fade out")
-                        }
-                        .buttonStyle(.plain)
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        NavigationLink { FavoriteCardArtistsView() } label: {
-                            ProfileRow(icon: "star.fill", title: "Artistas favoritos", subtitle: "Escolha os artistas dos packs de conquista")
-                        }
-                        .buttonStyle(.plain)
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        NavigationLink { ProfileWishlistView(username: session.profile?.username ?? "") } label: {
-                            ProfileRow(icon: "heart.fill", title: "Wishlist pública", subtitle: "Cartas desejadas que outros colecionadores podem oferecer")
-                        }.buttonStyle(.plain)
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        NavigationLink { ProfileFoldersView(profileID: session.userID) } label: {
-                            ProfileRow(icon: "folder.fill", title: "Pastas públicas", subtitle: "Organize e apresente partes da sua coleção")
-                        }.buttonStyle(.plain)
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Arquivos offline protegidos neste iPhone")
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        ProfileRow(icon: "questionmark.circle", title: "Ajuda e suporte", subtitle: "Fale com a equipe YePly")
-                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                        NavigationLink { LegalTermsView() } label: {
-                            ProfileRow(icon: "doc.text", title: "Termos e direitos autorais", subtitle: "Regras para músicas, cartas e comunidade")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .background(YePlyTheme.elevated.opacity(0.96), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
                     if container.isDemoBackend {
                         Label("Modo demonstração — conecte o Supabase para habilitar contas e uploads reais.", systemImage: "hammer.fill")
@@ -170,6 +136,14 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Badges e conquistas")
+                NavigationLink { ProfileSettingsView() } label: {
+                    Image(systemName: "gearshape.fill")
+                        .frame(width: 42, height: 42)
+                        .background(.black.opacity(0.34), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.16)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Configurações")
             }
             .padding(.top, 18)
 
@@ -261,11 +235,71 @@ struct ProfileView: View {
         async let equippedRequest = container.repository.fetchEquippedCardBadges(profileID: id)
         async let ownedRequest = container.repository.fetchOwnedProfileBadges(profileID: id)
         async let featuredRequest = container.repository.fetchFeaturedProfileCard(profileID: id)
+        async let collectorRequest = container.repository.fetchCollectorProfile(profileID: id)
+        async let wishlistRequest = container.repository.fetchUserWishlist(username: session.profile?.username ?? "")
+        async let foldersRequest = container.repository.fetchCardFolders(profileID: id)
+        async let marketRequest = container.repository.fetchPublicCardOffers(profileID: id)
         socialProfile = try? await profileRequest
         equippedBadges = (try? await equippedRequest) ?? equippedBadges
         let loadedBadges = (try? await ownedRequest) ?? []
         ownedBadgeCount = socialProfile?.ownedBadgeCount ?? loadedBadges.count
         featuredCard = try? await featuredRequest
+        collector = try? await collectorRequest
+        wishlist = (try? await wishlistRequest) ?? []
+        folders = (try? await foldersRequest) ?? []
+        marketOffers = (try? await marketRequest) ?? []
+    }
+}
+
+private struct ProfileSettingsView: View {
+    @EnvironmentObject private var session: SessionStore
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                if session.isAdmin {
+                    NavigationLink { AdminDashboardView() } label: {
+                        ProfileRow(icon: "slider.horizontal.3", title: "Administração", subtitle: "Catálogo, uploads e artistas verificados")
+                    }.buttonStyle(.plain)
+                    settingsDivider
+                }
+                NavigationLink { PlaybackHistoryView() } label: {
+                    ProfileRow(icon: "clock.arrow.circlepath", title: "Histórico de reprodução", subtitle: "Veja tudo que você ouviu")
+                }.buttonStyle(.plain)
+                settingsDivider
+                NavigationLink { PlaybackSettingsView() } label: {
+                    ProfileRow(icon: "waveform", title: "Reprodução", subtitle: "Sem atraso, fade in e fade out")
+                }.buttonStyle(.plain)
+                settingsDivider
+                NavigationLink { FavoriteCardArtistsView() } label: {
+                    ProfileRow(icon: "star.fill", title: "Artistas favoritos", subtitle: "Preferências para packs e recompensas")
+                }.buttonStyle(.plain)
+                settingsDivider
+                NavigationLink { ProfileWishlistView(username: session.profile?.username ?? "") } label: {
+                    ProfileRow(icon: "heart.fill", title: "Wishlist", subtitle: "Gerencie suas cartas desejadas")
+                }.buttonStyle(.plain)
+                settingsDivider
+                NavigationLink { ProfileFoldersView(profileID: session.userID) } label: {
+                    ProfileRow(icon: "folder.fill", title: "Pastas", subtitle: "Organize sua coleção pública")
+                }.buttonStyle(.plain)
+                settingsDivider
+                ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Conta, visibilidade e arquivos offline")
+                settingsDivider
+                ProfileRow(icon: "questionmark.circle", title: "Ajuda e suporte", subtitle: "Fale com a equipe YePly")
+                settingsDivider
+                NavigationLink { LegalTermsView() } label: {
+                    ProfileRow(icon: "doc.text", title: "Termos e direitos autorais", subtitle: "Regras para músicas, cartas e comunidade")
+                }.buttonStyle(.plain)
+            }
+            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(18)
+        }
+        .navigationTitle("Configurações")
+        .navigationBarTitleDisplayMode(.inline)
+        .yeplyBackground()
+    }
+
+    private var settingsDivider: some View {
+        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
     }
 }
 
@@ -415,7 +449,7 @@ struct ProfileBadgeShowcase: View {
                 .tracking(1.7)
                 .foregroundStyle(YePlyTheme.tertiary)
 
-            HStack(spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 4), spacing: 0) {
                 ForEach(badges.sorted { $0.slot < $1.slot }.prefix(4)) { badge in
                     VStack(spacing: 7) {
                         ProfileBadgeArtwork(
@@ -435,7 +469,6 @@ struct ProfileBadgeShowcase: View {
                             .frame(width: 64)
                     }
                 }
-                Spacer(minLength: 0)
             }
         }
         .padding(15)

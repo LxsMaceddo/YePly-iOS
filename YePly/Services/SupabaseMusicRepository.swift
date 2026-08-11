@@ -138,6 +138,7 @@ private struct PublicOfferInput: Encodable {
     let pInstanceId: UUID; let pAskingCoins: Int; let pNote: String?
     enum CodingKeys: String, CodingKey { case pInstanceId = "p_instance_id"; case pAskingCoins = "p_asking_coins"; case pNote = "p_note" }
 }
+private struct PublicOfferIDInput: Encodable { let pOfferId: UUID; enum CodingKeys: String, CodingKey { case pOfferId = "p_offer_id" } }
 private struct PresenceInput: Encodable {
     let pTrackId: UUID; let pTitle: String; let pArtistName: String; let pAlbumName: String?
     let pArtworkPath: String?; let pPositionSeconds: Int; let pDurationSeconds: Int; let pIsPlaying: Bool
@@ -356,14 +357,21 @@ actor SupabaseMusicRepository: MusicRepository {
             let page: [CollectibleCardItem]
             do {
                 page = try await client.rpc(
-                    "card_inventory_social_feed_page",
+                    "card_inventory_social_feed_v2_page",
                     params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
                 ).execute().value
             } catch {
-                page = try await client.rpc(
-                    "card_inventory_feed_page",
-                    params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
-                ).execute().value
+                do {
+                    page = try await client.rpc(
+                        "card_inventory_social_feed_page",
+                        params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
+                    ).execute().value
+                } catch {
+                    page = try await client.rpc(
+                        "card_inventory_feed_page",
+                        params: CardInventoryPageInput(pOffset: offset, pLimit: pageSize)
+                    ).execute().value
+                }
             }
             result.append(contentsOf: page)
             if page.count < pageSize { break }
@@ -508,7 +516,17 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func openCardPack(id: UUID) async throws -> [CollectibleCardItem] {
-        try await client.rpc("open_card_pack", params: CardPackInput(pPackId: id)).execute().value
+        var opened: [CollectibleCardItem] = try await client.rpc("open_card_pack", params: CardPackInput(pPackId: id)).execute().value
+        do {
+            let inventory = try await fetchCardInventory()
+            let editions = Dictionary(uniqueKeysWithValues: inventory.map { ($0.instanceId, ($0.editionNumber, $0.editionTotal)) })
+            for index in opened.indices {
+                guard let edition = editions[opened[index].instanceId] else { continue }
+                opened[index].editionNumber = edition.0
+                opened[index].editionTotal = edition.1
+            }
+        } catch { }
+        return opened
     }
 
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult {
@@ -596,12 +614,22 @@ actor SupabaseMusicRepository: MusicRepository {
         try await client.rpc("upsert_profile_music_presence", params: input).execute()
     }
 
-    func fetchPublicCardOffers() async throws -> [CardPublicOffer] {
-        try await client.rpc("card_public_offer_feed").execute().value
+    func fetchPublicCardOffers(profileID: UUID? = nil) async throws -> [CardPublicOffer] {
+        do {
+            return try await client.rpc("card_public_offer_feed_v2", params: OptionalProfileIDInput(pProfileId: profileID)).execute().value
+        } catch {
+            let all: [CardPublicOffer] = try await client.rpc("card_public_offer_feed").execute().value
+            guard let profileID else { return all }
+            return all.filter { $0.ownerId == profileID }
+        }
     }
 
     func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult {
         try await client.rpc("toggle_public_card_offer", params: PublicOfferInput(pInstanceId: instanceID, pAskingCoins: askingCoins, pNote: note)).execute().value
+    }
+
+    func buyPublicCardOffer(id: UUID) async throws -> CardMarketPurchaseResult {
+        try await client.rpc("buy_public_card_offer", params: PublicOfferIDInput(pOfferId: id)).execute().value
     }
 
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult {

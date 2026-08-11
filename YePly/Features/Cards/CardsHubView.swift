@@ -95,7 +95,7 @@ private final class CardsHubViewModel: ObservableObject {
             async let artists = repository.fetchCardArtists()
             async let trades = repository.fetchCardTrades()
             async let folders = repository.fetchCardFolders(profileID: nil)
-            async let offers = repository.fetchPublicCardOffers()
+            async let offers = repository.fetchPublicCardOffers(profileID: nil)
             self.dashboard = try await dashboard
             self.inventory = try await inventory
             self.packs = try await packs
@@ -980,6 +980,7 @@ private struct ResolvedCollectibleCard: View {
         CollectibleCardDisplayModel(
             id: card.id.uuidString, title: card.title, artistName: card.artistName,
             albumName: card.albumName, rarity: card.rarity, serialNumber: card.serialNumber,
+            editionNumber: card.editionNumber, editionTotal: card.editionTotal,
             artworkURL: artworkURL
         )
     }
@@ -1012,8 +1013,10 @@ private struct CardCollectionListRow: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 8) {
                 if card.isProtected == true { Image(systemName: "lock.shield.fill").foregroundStyle(YePlyTheme.accent) }
-                Text("#\(card.serialNumber.formatted(.number.grouping(.never)))")
-                    .font(.caption2.monospacedDigit().bold()).foregroundStyle(YePlyTheme.secondary)
+                if let edition = card.editionNumber, let total = card.editionTotal {
+                    Text("#\(edition.formatted()) / \(total.formatted())")
+                        .font(.caption2.monospacedDigit().bold()).foregroundStyle(YePlyTheme.secondary)
+                }
                 Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(YePlyTheme.tertiary)
             }
         }
@@ -1127,7 +1130,7 @@ struct CardDetailSheet: View {
         .preferredColorScheme(.dark)
         .task {
             folders = (try? await container.repository.fetchCardFolders(profileID: nil)) ?? []
-            let offers = (try? await container.repository.fetchPublicCardOffers()) ?? []
+            let offers = (try? await container.repository.fetchPublicCardOffers(profileID: nil)) ?? []
             if let current = offers.first(where: { $0.cardInstanceId == card.id }) { isPublicOffer = true; askingCoins = current.askingCoins }
         }
         .alert("Carta", isPresented: Binding(get: { actionMessage != nil }, set: { if !$0 { actionMessage = nil } })) { Button("OK") {} } message: { Text(actionMessage ?? "") }
@@ -1458,6 +1461,9 @@ private struct CreatePackCodeView: View {
     @State private var artistKey = ""
     @State private var isWorking = false
     @State private var errorMessage: String?
+    @State private var availableOwnCards: [CollectibleCardItem]
+    @State private var availableCoinBalance: Int
+    @State private var isLoadingOwnData = false
 
     var body: some View {
         NavigationStack {
@@ -1547,6 +1553,8 @@ struct CreateCardTradeView: View {
         self.initialUsername = initialUsername
         self.onCreated = onCreated
         _username = State(initialValue: initialUsername ?? "")
+        _availableOwnCards = State(initialValue: ownCards)
+        _availableCoinBalance = State(initialValue: coinBalance)
     }
 
     var body: some View {
@@ -1580,6 +1588,7 @@ struct CreateCardTradeView: View {
             .safeAreaInset(edge: .bottom) { tradeFooter }
             .alert("Troca", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") {} } message: { Text(errorMessage ?? "") }
             .task(id: initialUsername) {
+                await refreshOwnSide()
                 if initialUsername != nil, profile == nil { search() }
             }
         }
@@ -1619,7 +1628,7 @@ struct CreateCardTradeView: View {
         let isOwn = selectionSide == .offered
         let query = isOwn ? ownQuery : theirQuery
         let sort = isOwn ? ownSort : theirSort
-        let sourceCards = isOwn ? ownCards : theirCards
+        let sourceCards = isOwn ? availableOwnCards : theirCards
         let visibleCards = filteredCards(sourceCards, query: query, sort: sort)
 
         VStack(spacing: 10) {
@@ -1669,20 +1678,25 @@ struct CreateCardTradeView: View {
 
     private func coinSelector(isOwn: Bool) -> some View {
         let amount = isOwn ? offeredCoins : requestedCoins
-        let limit = isOwn ? coinBalance : 500_000
+        let limit = isOwn ? availableCoinBalance : 10_000_000
         return HStack(spacing: 11) {
             Image(systemName: "yensign.circle.fill").font(.title3).foregroundStyle(YePlyTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(isOwn ? "Moedas que você oferece" : "Moedas que você pede").font(.caption.bold())
-                Text(isOwn ? "Saldo: \(coinBalance.formatted())" : "Opcional na proposta")
+                Text(isOwn ? "Saldo: \(availableCoinBalance.formatted())" : "Digite qualquer valor exato")
                     .font(.caption2).foregroundStyle(YePlyTheme.secondary)
             }
             Spacer()
-            Button { setCoins(max(0, amount - 1_000), isOwn: isOwn) } label: { Image(systemName: "minus.circle.fill") }
-                .disabled(amount == 0)
-            Text(amount.formatted()).font(.subheadline.monospacedDigit().bold()).frame(minWidth: 62)
-            Button { setCoins(min(limit, amount + 1_000), isOwn: isOwn) } label: { Image(systemName: "plus.circle.fill") }
-                .disabled(amount >= limit)
+            TextField("0", value: Binding(
+                get: { amount },
+                set: { setCoins(min(max($0, 0), limit), isOwn: isOwn) }
+            ), format: .number.grouping(.never))
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.trailing)
+            .font(.subheadline.monospacedDigit().bold())
+            .frame(width: 104)
+            .padding(.horizontal, 10).frame(height: 36)
+            .background(YePlyTheme.elevatedStrong, in: RoundedRectangle(cornerRadius: 10))
         }
         .padding(12)
         .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
@@ -1745,7 +1759,7 @@ struct CreateCardTradeView: View {
     }
 
     private func isBlocked(_ card: CollectibleCardItem, onOwnSide: Bool) -> Bool {
-        let otherDefinitions = Set((onOwnSide ? theirCards : ownCards).map(\.definitionId))
+        let otherDefinitions = Set((onOwnSide ? theirCards : availableOwnCards).map(\.definitionId))
         return otherDefinitions.contains(card.definitionId)
     }
 
@@ -1762,6 +1776,17 @@ struct CreateCardTradeView: View {
 
     private func setCoins(_ amount: Int, isOwn: Bool) {
         if isOwn { offeredCoins = amount } else { requestedCoins = amount }
+    }
+
+    @MainActor private func refreshOwnSide() async {
+        isLoadingOwnData = true
+        defer { isLoadingOwnData = false }
+        do { availableOwnCards = try await container.repository.fetchCardInventory() } catch { }
+        do {
+            let dashboard = try await container.repository.fetchCardDashboard()
+            availableCoinBalance = dashboard.coinBalance ?? 0
+            offeredCoins = min(offeredCoins, availableCoinBalance)
+        } catch { }
     }
 
     private func search() {

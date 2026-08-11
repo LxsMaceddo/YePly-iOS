@@ -91,8 +91,9 @@ protocol MusicRepository: Sendable {
     func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary?
     func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence?
     func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws
-    func fetchPublicCardOffers() async throws -> [CardPublicOffer]
+    func fetchPublicCardOffers(profileID: UUID?) async throws -> [CardPublicOffer]
     func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult
+    func buyPublicCardOffer(id: UUID) async throws -> CardMarketPurchaseResult
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult
     func refreshCardRarities() async throws -> CardRewardResult
@@ -368,8 +369,11 @@ actor DemoMusicRepository: MusicRepository {
     func fetchCollectorProfile(profileID: UUID) async throws -> CollectorProfileSummary? { nil }
     func fetchProfileMusicPresence(profileID: UUID) async throws -> ProfileMusicPresence? { nil }
     func updateProfileMusicPresence(track: Track, artworkPath: String?, positionSeconds: Int, durationSeconds: Int, isPlaying: Bool) async throws {}
-    func fetchPublicCardOffers() async throws -> [CardPublicOffer] { [] }
+    func fetchPublicCardOffers(profileID: UUID?) async throws -> [CardPublicOffer] { [] }
     func togglePublicCardOffer(instanceID: UUID, askingCoins: Int, note: String?) async throws -> CardRewardResult { demoReward(nil) }
+    func buyPublicCardOffer(id: UUID) async throws -> CardMarketPurchaseResult {
+        CardMarketPurchaseResult(success: true, offerId: id, instanceId: UUID(), price: 0, tax: 0, sellerReceives: 0, coinBalance: 0)
+    }
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult { demoReward("Conquista Show Off atualizada.") }
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult { demoReward("Catálogo sincronizado.") }
     func refreshCardRarities() async throws -> CardRewardResult { demoReward("Raridades recalculadas.") }

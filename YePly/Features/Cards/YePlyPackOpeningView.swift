@@ -565,6 +565,8 @@ private struct ResolvedPackCard: View {
             albumName: card.albumName,
             rarity: card.rarity,
             serialNumber: card.serialNumber,
+            editionNumber: card.editionNumber,
+            editionTotal: card.editionTotal,
             artworkURL: artworkURL
         )
     }

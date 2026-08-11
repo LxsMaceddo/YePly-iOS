@@ -231,6 +231,8 @@ enum ProfileBadgeKind: String, Codable, CaseIterable, Sendable {
 struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
     let instanceId: UUID
     let serialNumber: Int
+    var editionNumber: Int? = nil
+    var editionTotal: Int? = nil
     let definitionId: UUID
     let trackId: UUID?
     let title: String
@@ -255,6 +257,8 @@ struct CollectibleCardItem: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case instanceId = "instance_id"
         case serialNumber = "serial_number"
+        case editionNumber = "edition_number"
+        case editionTotal = "edition_total"
         case definitionId = "definition_id"
         case trackId = "track_id"
         case title
@@ -337,6 +341,8 @@ struct CardPublicOffer: Codable, Identifiable, Hashable, Sendable {
     let avatarPath: String?
     let cardInstanceId: UUID
     let serialNumber: Int
+    var editionNumber: Int? = nil
+    var editionTotal: Int? = nil
     let definitionId: UUID
     let title: String
     let artistName: String
@@ -351,9 +357,25 @@ struct CardPublicOffer: Codable, Identifiable, Hashable, Sendable {
         case offerId = "offer_id"; case ownerId = "owner_id"; case username
         case displayName = "display_name"; case avatarPath = "avatar_path"
         case cardInstanceId = "card_instance_id"; case serialNumber = "serial_number"
+        case editionNumber = "edition_number"; case editionTotal = "edition_total"
         case definitionId = "definition_id"; case title; case artistName = "artist_name"
         case albumName = "album_name"; case artworkPath = "artwork_path"; case rarity
         case askingCoins = "asking_coins"; case note; case createdAt = "created_at"
+    }
+}
+
+struct CardMarketPurchaseResult: Codable, Hashable, Sendable {
+    let success: Bool
+    let offerId: UUID
+    let instanceId: UUID
+    let price: Int
+    let tax: Int
+    let sellerReceives: Int
+    let coinBalance: Int
+    enum CodingKeys: String, CodingKey {
+        case success, price, tax
+        case offerId = "offer_id"; case instanceId = "instance_id"
+        case sellerReceives = "seller_receives"; case coinBalance = "coin_balance"
     }
 }
 

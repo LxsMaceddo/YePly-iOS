@@ -58,6 +58,8 @@ public struct CollectibleCardDisplayModel: Identifiable, Hashable, Sendable {
     public var genre: String?
     public var rarity: CollectibleCardRarity
     public var serialNumber: Int
+    public var editionNumber: Int?
+    public var editionTotal: Int?
     public var artworkURL: URL?
     public var ownerUsername: String?
     public var favoriteCount: Int
@@ -71,6 +73,8 @@ public struct CollectibleCardDisplayModel: Identifiable, Hashable, Sendable {
         genre: String? = nil,
         rarity: CollectibleCardRarity,
         serialNumber: Int,
+        editionNumber: Int? = nil,
+        editionTotal: Int? = nil,
         artworkURL: URL? = nil,
         ownerUsername: String? = nil,
         favoriteCount: Int = 0,
@@ -83,6 +87,8 @@ public struct CollectibleCardDisplayModel: Identifiable, Hashable, Sendable {
         self.genre = genre
         self.rarity = rarity
         self.serialNumber = serialNumber
+        self.editionNumber = editionNumber
+        self.editionTotal = editionTotal
         self.artworkURL = artworkURL
         self.ownerUsername = ownerUsername
         self.favoriteCount = favoriteCount
@@ -90,7 +96,8 @@ public struct CollectibleCardDisplayModel: Identifiable, Hashable, Sendable {
     }
 
     fileprivate var formattedSerialNumber: String {
-        "#\(String(format: "%04d", max(0, serialNumber)))"
+        guard let editionNumber, let editionTotal, editionNumber > 0, editionTotal > 0 else { return "EDIÇÃO YEPLY" }
+        return "#\(editionNumber.formatted()) / \(editionTotal.formatted())"
     }
 }
 

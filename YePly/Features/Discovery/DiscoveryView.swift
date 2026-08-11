@@ -328,6 +328,7 @@ struct PublicProfileView: View {
     @State private var presence: ProfileMusicPresence?
     @State private var wishlist: [CardWishlistItem] = []
     @State private var folders: [CardFolder] = []
+    @State private var marketOffers: [CardPublicOffer] = []
     @State private var ownCards: [CollectibleCardItem] = []
     @State private var ownCoinBalance = 0
     @State private var showingTrade = false
@@ -341,7 +342,7 @@ struct PublicProfileView: View {
             ZStack(alignment: .top) {
                 Color.black.ignoresSafeArea()
                 PublicProfileBackdrop(url: backgroundURL)
-                    .frame(width: viewport.size.width, height: 520)
+                    .frame(width: viewport.size.width, height: viewport.size.height)
                     .ignoresSafeArea(edges: .top)
                     .opacity(Double(max(0, min(1, 1 + scrollOffset / 340))))
                 ScrollView {
@@ -384,6 +385,11 @@ struct PublicProfileView: View {
                     socialMetric(max(ownedBadgeCount, current.ownedBadgeCount ?? 0), "Badges")
                 }
                 if let collector { PublicCollectorPanel(summary: collector) }
+                if !marketOffers.isEmpty {
+                    ProfileMarketPanel(offers: marketOffers, isOwner: current.id == session.userID) {
+                        await refreshMarket()
+                    }
+                }
                 if !wishlist.isEmpty {
                     PublicWishlistPanel(items: wishlist) { showingTrade = true }
                 }
@@ -421,6 +427,7 @@ struct PublicProfileView: View {
                 async let presenceRequest = container.repository.fetchProfileMusicPresence(profileID: current.id)
                 async let wishlistRequest = container.repository.fetchUserWishlist(username: current.username)
                 async let foldersRequest = container.repository.fetchCardFolders(profileID: current.id)
+                async let marketRequest = container.repository.fetchPublicCardOffers(profileID: current.id)
                 current = try await profile
                 equippedBadges = try await badges
                 ownedBadgeCount = (try? await allBadges)?.count ?? current.ownedBadgeCount ?? equippedBadges.count
@@ -429,6 +436,7 @@ struct PublicProfileView: View {
                 presence = try? await presenceRequest
                 wishlist = (try? await wishlistRequest) ?? []
                 folders = (try? await foldersRequest) ?? []
+                marketOffers = (try? await marketRequest) ?? []
                 if let path = current.backgroundPath { backgroundURL = try? await container.repository.signedAvatarURL(path: path) }
                 if current.id != session.userID {
                     async let cards = container.repository.fetchCardInventory()
@@ -459,6 +467,10 @@ struct PublicProfileView: View {
             current.followerCount = max(0, (current.followerCount ?? 0) + (followed && !previous ? 1 : !followed && previous ? -1 : 0))
         } catch { errorMessage = error.localizedDescription }
     }
+
+    @MainActor private func refreshMarket() async {
+        marketOffers = (try? await container.repository.fetchPublicCardOffers(profileID: current.id)) ?? []
+    }
 }
 
 private struct PublicProfileScrollOffsetKey: PreferenceKey {
@@ -481,7 +493,7 @@ private struct PublicProfileBackdrop: View {
     }
 }
 
-private struct PublicProfilePresencePanel: View {
+struct PublicProfilePresencePanel: View {
     let presence: ProfileMusicPresence
     var body: some View {
         HStack(spacing: 13) {
@@ -517,7 +529,7 @@ private struct NowPlayingBars: View {
     }
 }
 
-private struct PublicCollectorPanel: View {
+struct PublicCollectorPanel: View {
     let summary: CollectorProfileSummary
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -529,25 +541,33 @@ private struct PublicCollectorPanel: View {
     private func metric(_ value: Int, _ label: String) -> some View { VStack { Text(value.formatted()).font(.headline.bold()); Text(label).font(.caption2).foregroundStyle(YePlyTheme.secondary) }.frame(maxWidth: .infinity) }
 }
 
-private struct PublicWishlistPanel: View {
+struct PublicWishlistPanel: View {
     let items: [CardWishlistItem]
-    let proposeTrade: () -> Void
+    var proposeTrade: (() -> Void)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Label("Cartas desejadas", systemImage: "heart.fill").font(.headline); Spacer(); Button("Oferecer", action: proposeTrade).font(.caption.bold()) }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) { ForEach(items.prefix(12)) { item in
+            HStack {
+                Label("Cartas desejadas", systemImage: "heart.fill").font(.headline)
+                Spacer()
+                if let proposeTrade { Button("Oferecer", action: proposeTrade).font(.caption.bold()) }
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
+                ForEach(items.prefix(8)) { item in
                     VStack(alignment: .leading, spacing: 5) {
-                        CardBrowserArtwork(path: item.artworkPath, seed: item.definitionId.uuidString, title: item.title, tint: item.rarity.accentColor, cornerRadius: 12).frame(width: 92, height: 92)
-                        Text(item.title).font(.caption.bold()).lineLimit(1).frame(width: 92, alignment: .leading)
+                        CardBrowserArtwork(path: item.artworkPath, seed: item.definitionId.uuidString, title: item.title, tint: item.rarity.accentColor, cornerRadius: 12)
+                            .aspectRatio(1, contentMode: .fit)
+                        Text(item.title).font(.caption2.bold()).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } }
+                }
+            }
+            if items.isEmpty {
+                Text("Nenhuma carta adicionada ainda.").font(.caption).foregroundStyle(YePlyTheme.secondary)
             }
         }.padding(16).background(YePlyTheme.elevated.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 
-private struct PublicFoldersPanel: View {
+struct PublicFoldersPanel: View {
     let folders: [CardFolder]
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -556,7 +576,68 @@ private struct PublicFoldersPanel: View {
                 HStack { Text(folder.emoji).font(.title2); VStack(alignment: .leading) { Text(folder.name).font(.subheadline.bold()); Text("\(folder.itemCount) cartas").font(.caption).foregroundStyle(YePlyTheme.secondary) }; Spacer(); Image(systemName: "chevron.right") }
                     .padding(12).background(YePlyTheme.elevatedStrong, in: RoundedRectangle(cornerRadius: 15))
             }
+            if folders.isEmpty {
+                Text("Nenhuma pasta pública criada ainda.").font(.caption).foregroundStyle(YePlyTheme.secondary)
+            }
         }.padding(16).background(YePlyTheme.elevated.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+struct ProfileMarketPanel: View {
+    @EnvironmentObject private var container: AppContainer
+    let offers: [CardPublicOffer]
+    let isOwner: Bool
+    let didChange: @MainActor () async -> Void
+    @State private var buying: UUID?
+    @State private var message: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Mercado", systemImage: "storefront.fill").font(.headline)
+                Spacer()
+                Text("7% de taxa").font(.caption2.bold()).foregroundStyle(YePlyTheme.tertiary)
+            }
+            ForEach(offers.prefix(8)) { offer in
+                HStack(spacing: 11) {
+                    CardBrowserArtwork(path: offer.artworkPath, seed: offer.definitionId.uuidString, title: offer.title, tint: offer.rarity.accentColor, cornerRadius: 12)
+                        .frame(width: 58, height: 58)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(offer.title).font(.subheadline.bold()).lineLimit(1)
+                        Text(offer.albumName).font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+                        Text("¥ \(offer.askingCoins.formatted())").font(.caption.bold()).foregroundStyle(YePlyTheme.accent)
+                    }
+                    Spacer()
+                    if !isOwner {
+                        Button {
+                            Task { await buy(offer) }
+                        } label: {
+                            if buying == offer.id { ProgressView().tint(.black) }
+                            else { Text("Comprar").font(.caption.bold()) }
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.black)
+                        .frame(width: 76, height: 36).background(YePlyTheme.accent, in: Capsule())
+                        .disabled(buying != nil)
+                    }
+                }
+                .padding(10).background(YePlyTheme.elevatedStrong, in: RoundedRectangle(cornerRadius: 16))
+            }
+            if offers.isEmpty {
+                Text("Nenhuma carta à venda agora.").font(.caption).foregroundStyle(YePlyTheme.secondary)
+            }
+        }
+        .padding(16).background(YePlyTheme.elevated.opacity(0.95), in: RoundedRectangle(cornerRadius: 20))
+        .alert("Mercado", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
+    }
+
+    @MainActor private func buy(_ offer: CardPublicOffer) async {
+        buying = offer.id
+        defer { buying = nil }
+        do {
+            let result = try await container.repository.buyPublicCardOffer(id: offer.id)
+            message = "Compra concluída por ¥ \(result.price.formatted()). O vendedor recebeu ¥ \(result.sellerReceives.formatted()) após a taxa."
+            await didChange()
+        } catch { message = error.localizedDescription }
     }
 }
 

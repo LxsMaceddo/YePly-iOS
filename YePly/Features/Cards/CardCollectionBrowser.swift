@@ -286,9 +286,11 @@ private struct CardCollectionBrowserRow: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 11) {
-                Text("#\(card.serialNumber)")
-                    .font(.caption2.monospacedDigit().bold())
-                    .foregroundStyle(YePlyTheme.secondary)
+                if let edition = card.editionNumber, let total = card.editionTotal {
+                    Text("#\(edition.formatted()) / \(total.formatted())")
+                        .font(.caption2.monospacedDigit().bold())
+                        .foregroundStyle(YePlyTheme.secondary)
+                }
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
                     .foregroundStyle(YePlyTheme.tertiary)
