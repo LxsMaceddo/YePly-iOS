@@ -45,6 +45,16 @@ const canonicalReleaseDates = new Map<string, string>([
   ["3mH6qwIy9crq0I9YQbOuDf", "2016-08-20"],
   ["6OGzmhzHcjf0uN9j7dYvZH", "2017-03-10"],
   ["71VX8yv9T2hNIYVZJVUWVp", "2019-11-02"],
+  ["2R3jSaMM1H6qecjhZtlgJH", "2016-03-21"],
+  ["3HWIvqzXPCK4KNgzn6h1LL", "2017-10-10"],
+  ["4ImH7XwaBuqBBQQ4V16jW7", "2017-12-26"],
+  ["6kjXPFw0BT3SdpWgHwjr32", "2018-10-13"],
+  ["22qXEcma67stw3AZOaDWmq", "2020-09-08"],
+  ["1rqGgyvgN6ypRrnh0s6hsn", "2021-12-01"],
+  ["4YxPiDQY2qbVb0tJHEhAxS", "2022-11-17"],
+  ["4CGf0iysUv0JUMoBqx4GOx", "2023-12-15"],
+  ["5FVM8teszzq7kZyIjkI4Vu", "2025-05-01"],
+  ["3OB3nqd1Vm38NSTT4gC1gN", "2025-12-16"],
 ]);
 
 type KnownAlbum = {
@@ -52,6 +62,7 @@ type KnownAlbum = {
   title: string;
   expectedTrackCount: number;
   releaseGroupMBID?: string;
+  artworkSpotifyAlbumID?: string;
 };
 
 type KnownArtist = {
@@ -110,7 +121,7 @@ const knownArtists: KnownArtist[] = [
       { spotifyAlbumID: "2nkto6YNI4rUYTLqEwWJ3o", title: "Flower Boy", expectedTrackCount: 14 },
       { spotifyAlbumID: "5zi7WsKlIiUXv09tbGLKsE", title: "IGOR", expectedTrackCount: 12 },
       { spotifyAlbumID: "5iUwaD3wFVwfaAfs9Z0eCh", title: "BEST INTEREST", expectedTrackCount: 1 },
-      { spotifyAlbumID: "1GG6U2SSJPHO6XsFiBzxYv", title: "CALL ME IF YOU GET LOST: The Estate Sale", expectedTrackCount: 24 },
+      { spotifyAlbumID: "1GG6U2SSJPHO6XsFiBzxYv", artworkSpotifyAlbumID: "45ba6QAtNrdv6Ke4MFOKk9", title: "CALL ME IF YOU GET LOST: The Estate Sale", expectedTrackCount: 24 },
       { spotifyAlbumID: "3pj1ebiwii7X06BNZglObJ", title: "CHROMAKOPIA +", expectedTrackCount: 15 },
       { spotifyAlbumID: "66dOCZnzAEgxWpG8DVjoUv", title: "DON'T TAP THE GLASS", expectedTrackCount: 10 },
     ],
@@ -129,6 +140,26 @@ const knownArtists: KnownArtist[] = [
       { spotifyAlbumID: "3mH6qwIy9crq0I9YQbOuDf", title: "Blonde", expectedTrackCount: 17 },
       { spotifyAlbumID: "6OGzmhzHcjf0uN9j7dYvZH", title: "Chanel", expectedTrackCount: 1 },
       { spotifyAlbumID: "71VX8yv9T2hNIYVZJVUWVp", title: "In My Room", expectedTrackCount: 1 },
+    ],
+  },
+  {
+    musicBrainzID: "4d278397-9843-4e4d-abc3-afcbf64a992f",
+    appleMusicID: "1437428576",
+    primarySpotifyID: "1YOVBTvznjiDvtAj4ExHeo",
+    spotifyIDs: ["1YOVBTvznjiDvtAj4ExHeo"],
+    displayName: "BK",
+    aliases: ["bk", "bk'", "abebe bikila"],
+    albums: [
+      { releaseGroupMBID: "de223067-932e-4b26-9253-f38c9ca09504", spotifyAlbumID: "2R3jSaMM1H6qecjhZtlgJH", title: "Castelos & Ruínas", expectedTrackCount: 13 },
+      { spotifyAlbumID: "3HWIvqzXPCK4KNgzn6h1LL", title: "Antes dos Gigantes Chegarem, Vol.1", expectedTrackCount: 3 },
+      { spotifyAlbumID: "4ImH7XwaBuqBBQQ4V16jW7", title: "Antes dos Gigantes Chegarem, Vol. 2", expectedTrackCount: 3 },
+      { spotifyAlbumID: "6kjXPFw0BT3SdpWgHwjr32", title: "Gigantes", expectedTrackCount: 13 },
+      { spotifyAlbumID: "22qXEcma67stw3AZOaDWmq", title: "O Líder em Movimento", expectedTrackCount: 10 },
+      { spotifyAlbumID: "1rqGgyvgN6ypRrnh0s6hsn", title: "Cidade do Pecado", expectedTrackCount: 5 },
+      { spotifyAlbumID: "4YxPiDQY2qbVb0tJHEhAxS", title: "ICARUS", expectedTrackCount: 13 },
+      { spotifyAlbumID: "4CGf0iysUv0JUMoBqx4GOx", title: "VERÃO CRIMINOSO", expectedTrackCount: 18 },
+      { spotifyAlbumID: "5FVM8teszzq7kZyIjkI4Vu", title: "Diamantes, Lágrimas e Rostos para Esquecer", expectedTrackCount: 16 },
+      { spotifyAlbumID: "3OB3nqd1Vm38NSTT4gC1gN", title: "PRODUTO DO AMBIENTE", expectedTrackCount: 11 },
     ],
   },
 ];
@@ -653,6 +684,10 @@ Deno.serve(async (request) => {
     let musicBrainzMatches = 0;
     for (const candidate of candidates) {
       const spotifyAlbum = await fetchSpotifyAlbum(candidate.id, spotifyToken);
+      if (candidate.known?.artworkSpotifyAlbumID) {
+        const artworkAlbum = await fetchSpotifyAlbum(candidate.known.artworkSpotifyAlbumID, spotifyToken);
+        spotifyAlbum.images = artworkAlbum.images;
+      }
       const imported = importedSpotifyAlbum(spotifyAlbum, candidate.known, artist.displayName);
       if (candidate.known?.releaseGroupMBID) {
         try {

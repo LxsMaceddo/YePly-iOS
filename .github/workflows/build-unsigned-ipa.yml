@@ -42,13 +42,13 @@ jobs:
           mkdir -p package/Payload
           ditto "$APP" package/Payload/YePly.app
           cd package
-          /usr/bin/zip -qry ../YePly-2.9.1-unsigned.ipa Payload
+          /usr/bin/zip -qry ../YePly-2.10.0-unsigned.ipa Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v6
         with:
           name: YePly-IPA
-          path: YePly-2.9.1-unsigned.ipa
+          path: YePly-2.10.0-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 
