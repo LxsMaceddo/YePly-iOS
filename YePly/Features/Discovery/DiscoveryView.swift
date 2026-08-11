@@ -321,6 +321,8 @@ struct PublicProfileView: View {
     @EnvironmentObject private var session: SessionStore
     @State private var current: UserProfile
     @State private var equippedBadges: [EquippedAlbumBadge] = []
+    @State private var ownedBadgeCount = 0
+    @State private var featuredCard: CollectibleCardItem?
     @State private var errorMessage: String?
 
     init(profile: UserProfile) { _current = State(initialValue: profile) }
@@ -339,9 +341,13 @@ struct PublicProfileView: View {
                 if !equippedBadges.isEmpty {
                     ProfileBadgeShowcase(badges: equippedBadges)
                 }
+                if let featuredCard {
+                    ProfileFeaturedCardPanel(card: featuredCard)
+                }
                 HStack(spacing: 10) {
                     socialMetric(current.followerCount ?? 0, "Seguidores")
                     socialMetric(current.followingCount ?? 0, "Seguindo")
+                    socialMetric(max(ownedBadgeCount, current.ownedBadgeCount ?? 0), "Badges")
                 }
                 if let bio = current.bio, !bio.isEmpty {
                     Text(bio).font(.subheadline).foregroundStyle(YePlyTheme.secondary).multilineTextAlignment(.center).padding(16)
@@ -349,7 +355,7 @@ struct PublicProfileView: View {
                 }
                 if let tastes = current.tastes, !tastes.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("GOSTOS").font(.caption2.bold()).tracking(1.7).foregroundStyle(YePlyTheme.tertiary)
+                        Text("ESTILOS MUSICAIS").font(.caption2.bold()).tracking(1.7).foregroundStyle(YePlyTheme.tertiary)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
                             ForEach(tastes, id: \.self) { Text($0).font(.caption.weight(.semibold)).padding(.horizontal, 10).frame(height: 32).background(YePlyTheme.elevatedStrong, in: Capsule()) }
                         }
@@ -365,8 +371,12 @@ struct PublicProfileView: View {
             do {
                 async let profile = container.repository.fetchProfile(id: current.id)
                 async let badges = container.repository.fetchEquippedCardBadges(profileID: current.id)
+                async let allBadges = container.repository.fetchOwnedProfileBadges(profileID: current.id)
+                async let featured = container.repository.fetchFeaturedProfileCard(profileID: current.id)
                 current = try await profile
                 equippedBadges = try await badges
+                ownedBadgeCount = (try? await allBadges)?.count ?? current.ownedBadgeCount ?? equippedBadges.count
+                featuredCard = try? await featured
             }
             catch { errorMessage = error.localizedDescription }
         }

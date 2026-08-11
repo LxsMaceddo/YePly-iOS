@@ -8,6 +8,7 @@ struct CardBrowserArtwork: View {
     let path: String?
     let seed: String
     let title: String
+    var albumName: String? = nil
     var tint: Color = YePlyTheme.accentSoft
     var cornerRadius: CGFloat = 16
 
@@ -19,8 +20,15 @@ struct CardBrowserArtwork: View {
             ZStack {
                 placeholder
 
-                if let resolvedURL, !didFail {
-                    YePlyRemoteImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
+                let candidates = YePlyArtworkFallbacks.candidates(
+                    primary: resolvedURL,
+                    albumName: albumName ?? title
+                )
+                if !candidates.isEmpty, !didFail {
+                    YePlyRemoteImage(
+                        urls: candidates,
+                        transaction: Transaction(animation: .easeOut(duration: 0.12))
+                    ) { phase in
                         switch phase {
                         case let .success(image):
                             image

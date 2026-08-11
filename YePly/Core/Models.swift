@@ -29,6 +29,8 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
     var followerCount: Int? = nil
     var followingCount: Int? = nil
     var isFollowed: Bool? = nil
+    var ownedBadgeCount: Int? = nil
+    var residenceCountryCode: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -43,6 +45,8 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
         case followerCount = "follower_count"
         case followingCount = "following_count"
         case isFollowed = "is_followed"
+        case ownedBadgeCount = "owned_badge_count"
+        case residenceCountryCode = "residence_country_code"
     }
 }
 

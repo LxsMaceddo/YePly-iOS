@@ -7,6 +7,7 @@ private struct ProfileUpdatePayload: Encodable, Sendable {
     let tastes: [String]
     let avatarPath: String?
     let backgroundPath: String?
+    let residenceCountryCode: String?
 
     enum CodingKeys: String, CodingKey {
         case displayName = "display_name"
@@ -14,6 +15,7 @@ private struct ProfileUpdatePayload: Encodable, Sendable {
         case tastes
         case avatarPath = "avatar_path"
         case backgroundPath = "background_path"
+        case residenceCountryCode = "residence_country_code"
     }
 }
 
@@ -104,6 +106,7 @@ final class SessionStore: ObservableObject {
         displayName: String,
         bio: String,
         tastes: [String],
+        residenceCountryCode: String?,
         avatarJPEG: Data?,
         backgroundJPEG: Data?
     ) async -> Bool {
@@ -112,14 +115,17 @@ final class SessionStore: ObservableObject {
         let cleanName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanTastes = Array(Set(tastes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
+        let cleanCountryCode = residenceCountryCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !cleanName.isEmpty, cleanName.count <= 80 else { errorMessage = "Informe um nome de até 80 caracteres."; return false }
         guard cleanBio.count <= 280 else { errorMessage = "A descrição pode ter no máximo 280 caracteres."; return false }
-        guard cleanTastes.count <= 12, cleanTastes.allSatisfy({ $0.count <= 30 }) else { errorMessage = "Use até 12 gostos com no máximo 30 caracteres cada."; return false }
+        guard cleanTastes.count <= 8, cleanTastes.allSatisfy({ $0.count <= 30 }) else { errorMessage = "Escolha até 8 estilos musicais."; return false }
+        guard cleanCountryCode == nil || cleanCountryCode?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else { errorMessage = "Selecione um país válido."; return false }
 
         if isDemo || client == nil {
             current.displayName = cleanName
             current.bio = cleanBio.isEmpty ? nil : cleanBio
             current.tastes = cleanTastes
+            current.residenceCountryCode = cleanCountryCode
             if let avatarJPEG {
                 current.avatarPath = "demo/avatar"
                 try? saveLocalAvatar(avatarJPEG, userID: current.id)
@@ -168,7 +174,8 @@ final class SessionStore: ObservableObject {
                 bio: cleanBio.isEmpty ? nil : cleanBio,
                 tastes: cleanTastes,
                 avatarPath: newAvatarPath,
-                backgroundPath: newBackgroundPath
+                backgroundPath: newBackgroundPath,
+                residenceCountryCode: cleanCountryCode
             )
             let updated: UserProfile = try await client.from("profiles").update(payload).eq("id", value: current.id).select().single().execute().value
             if let avatarJPEG { try saveLocalAvatar(avatarJPEG, userID: current.id) }

@@ -1,16 +1,59 @@
 import SwiftUI
 
 private enum CardsHubSection: String, CaseIterable, Identifiable {
-    case packs, collection, albums, achievements, trades
+    case packs, store, collection, albums, achievements, wishlist, trades
     var id: String { rawValue }
     var title: String {
         switch self {
         case .packs: "Packs"
+        case .store: "Loja"
         case .collection: "Coleção"
         case .albums: "Álbuns"
         case .achievements: "Conquistas"
+        case .wishlist: "Desejadas"
         case .trades: "Trocas"
         }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .packs: "shippingbox.fill"
+        case .store: "bag.fill"
+        case .collection: "rectangle.stack.fill"
+        case .albums: "square.stack.fill"
+        case .achievements: "trophy.fill"
+        case .wishlist: "heart.fill"
+        case .trades: "arrow.left.arrow.right"
+        }
+    }
+}
+
+private struct CardsHubSectionBar: View {
+    @Binding var selection: CardsHubSection
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(CardsHubSection.allCases) { section in
+                    Button {
+                        withAnimation(.snappy) { selection = section }
+                    } label: {
+                        Label(section.title, systemImage: section.symbolName)
+                            .font(.caption.bold())
+                            .foregroundStyle(selection == section ? .black : .white.opacity(0.76))
+                            .padding(.horizontal, 13)
+                            .frame(height: 38)
+                            .background(
+                                selection == section ? YePlyTheme.accent : YePlyTheme.elevated,
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .contentMargins(.horizontal, 1, for: .scrollContent)
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 
@@ -24,12 +67,15 @@ private final class CardsHubViewModel: ObservableObject {
     @Published var achievements: [CardAchievement] = []
     @Published var artists: [CardArtistOption] = []
     @Published var trades: [CardTradeSummary] = []
+    @Published var wishlist: [CardWishlistItem] = []
+    @Published var storeProducts = CardPackProductKind.allCases.map { CardPackStoreProduct(kind: $0) }
     @Published var openedPack: YePlyOpenedPack?
     @Published var openedPacks: [YePlyOpenedPack] = []
     @Published var rewardMessage: String?
     @Published var errorMessage: String?
     @Published var isLoading = false
     @Published var isOpeningPack = false
+    @Published var purchasingProduct: CardPackProductKind?
 
     func load(repository: any MusicRepository) async {
         isLoading = true
@@ -46,10 +92,24 @@ private final class CardsHubViewModel: ObservableObject {
             self.inventory = try await inventory
             self.packs = try await packs
             self.albums = try await albums
-            self.albumCatalog = (try? await repository.fetchCardAlbumCatalog()) ?? []
+            self.albumCatalog = try await repository.fetchCardAlbumCatalog()
             self.achievements = try await achievements
             self.artists = try await artists
             self.trades = try await trades
+            do {
+                let loadedWishlist = try await repository.fetchCardWishlist()
+                self.wishlist = loadedWishlist
+            } catch {
+                self.wishlist = []
+            }
+            do {
+                let loadedStore = try await repository.fetchCardPackStore()
+                if !loadedStore.isEmpty {
+                    self.storeProducts = loadedStore.sorted { ($0.sortOrder ?? 999) < ($1.sortOrder ?? 999) }
+                }
+            } catch {
+                self.storeProducts = CardPackProductKind.allCases.map { CardPackStoreProduct(kind: $0) }
+            }
             errorMessage = nil
         } catch let error where error.isYePlyCancellation { return }
         catch { errorMessage = error.localizedDescription }
@@ -134,6 +194,24 @@ private final class CardsHubViewModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
+    func buy(_ product: CardPackProductKind, repository: any MusicRepository) async {
+        guard purchasingProduct == nil else { return }
+        purchasingProduct = product
+        defer { purchasingProduct = nil }
+        do {
+            let result = try await repository.buyCardPack(product: product)
+            rewardMessage = result.message ?? "\(product.title) adicionado aos seus packs."
+            await load(repository: repository)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func toggleWishlist(definitionID: UUID, repository: any MusicRepository) async {
+        do {
+            _ = try await repository.toggleCardWishlist(definitionID: definitionID)
+            await load(repository: repository)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func syncKanye(repository: any MusicRepository) async {
         do {
             let reward = try await repository.syncCollectibleCatalog(artistName: "Kanye West")
@@ -166,10 +244,7 @@ struct CardsHubView: View {
                     ProgressView("Carregando coleção…").frame(maxWidth: .infinity).padding(.top, 60)
                 } else {
                     levelCard
-                    Picker("Seção", selection: $section) {
-                        ForEach(CardsHubSection.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+                    CardsHubSectionBar(selection: $section)
                     content
                 }
             }
@@ -190,7 +265,11 @@ struct CardsHubView: View {
             FavoriteCardArtistsView(onSaved: { Task { await model.load(repository: container.repository) } })
         }
         .sheet(isPresented: $showingTradeCreator) {
-            CreateCardTradeView(ownCards: model.inventory, onCreated: { Task { await model.load(repository: container.repository) } })
+            CreateCardTradeView(
+                ownCards: model.inventory,
+                coinBalance: model.dashboard.coinBalance ?? 0,
+                onCreated: { Task { await model.load(repository: container.repository) } }
+            )
         }
         .sheet(isPresented: $showingPackCodeCreator) {
             CreatePackCodeView(artists: model.artists) { createdCode in
@@ -233,9 +312,21 @@ struct CardsHubView: View {
 
     private var cardArtworkResolver: YePlyCardArtworkResolver {
         { card in
-            guard let path = card.artworkPath else { return nil }
-            if let url = URL(string: path), url.scheme?.lowercased() == "https" { return url }
-            return try? await container.repository.signedCoverURL(path: path)
+            let primary: URL?
+            if let path = card.artworkPath,
+               let direct = URL(string: path),
+               direct.scheme?.lowercased() == "https" {
+                primary = direct
+            } else if let path = card.artworkPath {
+                primary = try? await container.repository.signedCoverURL(path: path)
+            } else {
+                primary = nil
+            }
+            let candidates = YePlyArtworkFallbacks.candidates(primary: primary, albumName: card.albumName)
+            for candidate in candidates {
+                if await YePlyRemoteImageLoader.shared.data(for: candidate) != nil { return candidate }
+            }
+            return candidates.first
         }
     }
 
@@ -274,6 +365,15 @@ struct CardsHubView: View {
                 Label("\(model.dashboard.completedAlbums) álbuns", systemImage: "checkmark.seal.fill")
             }
             .font(.caption).foregroundStyle(YePlyTheme.secondary)
+            Divider().overlay(YePlyTheme.line)
+            HStack {
+                Label("CARTEIRA", systemImage: "yensign.circle.fill")
+                    .font(.caption2.bold()).tracking(1.2).foregroundStyle(YePlyTheme.tertiary)
+                Spacer()
+                Text("\((model.dashboard.coinBalance ?? 0).formatted()) moedas")
+                    .font(.subheadline.monospacedDigit().bold())
+                    .foregroundStyle(YePlyTheme.accent)
+            }
         }
         .padding(16).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
     }
@@ -281,9 +381,11 @@ struct CardsHubView: View {
     @ViewBuilder private var content: some View {
         switch section {
         case .packs: packsSection
+        case .store: storeSection
         case .collection: collectionSection
         case .albums: albumsSection
         case .achievements: achievementsSection
+        case .wishlist: wishlistSection
         case .trades: tradesSection
         }
     }
@@ -342,41 +444,139 @@ struct CardsHubView: View {
         CardCollectionBrowser(cards: model.inventory) { selectedCard = $0 }
     }
 
-    private var albumsSection: some View {
-        CardAlbumLibraryBrowser(albums: model.albums, cards: model.inventory, catalog: model.albumCatalog) { selectedCard = $0 }
+    private var storeSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            CardStoreHero(balance: model.dashboard.coinBalance ?? 0)
+
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("PACK LAB").font(.caption2.bold()).tracking(1.8).foregroundStyle(YePlyTheme.accent)
+                    Text("Escolha sua próxima abertura").font(.title3.bold())
+                }
+                Spacer()
+                Text("Economia protegida")
+                    .font(.caption2.bold()).foregroundStyle(.green)
+                    .padding(.horizontal, 9).frame(height: 26)
+                    .background(Color.green.opacity(0.13), in: Capsule())
+            }
+
+            LazyVStack(spacing: 12) {
+                ForEach(model.storeProducts) { product in
+                    CardStoreProductTile(
+                        product: product,
+                        balance: model.dashboard.coinBalance ?? 0,
+                        isBuying: model.purchasingProduct == product.productKey
+                    ) {
+                        Task { await model.buy(product.productKey, repository: container.repository) }
+                    }
+                }
+            }
+
+            Label(
+                "As cartas excedentes viram moedas automaticamente. Os valores variam por raridade, popularidade e um fator aleatório controlado.",
+                systemImage: "shield.checkered"
+            )
+            .font(.caption).foregroundStyle(YePlyTheme.secondary)
+            .padding(14)
+            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        }
     }
 
-    private var achievementsSection: some View {
-        LazyVStack(spacing: 11) {
-            ForEach(model.achievements) { achievement in
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 12) {
-                        Image(systemName: achievement.symbolName).font(.title2).foregroundStyle(achievement.isUnlocked ? YePlyTheme.accent : YePlyTheme.tertiary).frame(width: 34)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(achievement.title).font(.headline)
-                            Text(achievement.description).font(.caption).foregroundStyle(YePlyTheme.secondary)
-                        }
-                        Spacer()
-                    }
-                    ProgressView(value: achievement.completion).tint(achievement.isUnlocked ? .green : YePlyTheme.accent)
-                    HStack {
-                        Text("\(min(achievement.progress, achievement.target).formatted()) / \(achievement.target.formatted())").font(.caption2).foregroundStyle(YePlyTheme.tertiary)
-                        Spacer()
-                        if achievement.canClaimReward {
-                            Menu("Escolher pack · 5 cartas") {
-                                ForEach(model.artists.filter { model.dashboard.favoriteArtists.contains($0.artistKey) }) { artist in
-                                    Button(artist.artistName) { Task { await model.claim(achievement, artistKey: artist.artistKey, repository: container.repository) } }
-                                }
-                                Button("Escolher favoritos…") { showingFavorites = true }
-                            }
-                            .font(.caption.bold()).foregroundStyle(YePlyTheme.accent)
-                        } else if achievement.rewardClaimedAt != nil {
-                            Label("Resgatada", systemImage: "checkmark.circle.fill").font(.caption.bold()).foregroundStyle(.green)
+    private var albumsSection: some View {
+        CardAlbumLibraryBrowser(
+            albums: model.albums,
+            cards: model.inventory,
+            catalog: model.albumCatalog,
+            wishlistDefinitionIDs: Set(model.wishlist.map(\.definitionId)),
+            onSelectCard: { selectedCard = $0 },
+            onToggleWishlist: { definitionID in
+                Task { await model.toggleWishlist(definitionID: definitionID, repository: container.repository) }
+            }
+        )
+    }
+
+    private var wishlistSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("RADAR DE CARTAS").font(.caption2.bold()).tracking(1.6).foregroundStyle(YePlyTheme.accent)
+                    Text("Cartas que você quer").font(.title3.bold())
+                }
+                Spacer()
+                Text(model.wishlist.count.formatted())
+                    .font(.headline.monospacedDigit())
+                    .padding(.horizontal, 12).frame(height: 34)
+                    .background(YePlyTheme.elevated, in: Capsule())
+            }
+
+            if model.wishlist.isEmpty {
+                ContentUnavailableView(
+                    "Sua lista está vazia",
+                    systemImage: "heart.text.square",
+                    description: Text("Abra um álbum e toque no coração de uma carta que ainda falta.")
+                )
+                .padding(.top, 28)
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(model.wishlist) { item in
+                        CardWishlistRow(item: item) {
+                            Task { await model.toggleWishlist(definitionID: item.definitionId, repository: container.repository) }
                         }
                     }
                 }
-                .padding(14).background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17))
             }
+        }
+    }
+
+    private var achievementsSection: some View {
+        LazyVStack(alignment: .leading, spacing: 20) {
+            ForEach(achievementGroups) { group in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text(group.emoji).font(.title2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.title.uppercased()).font(.caption.bold()).tracking(1.4)
+                            Text("\(group.items.filter(\.isUnlocked).count)/\(group.items.count) liberadas")
+                                .font(.caption2).foregroundStyle(YePlyTheme.tertiary)
+                        }
+                    }
+                    ForEach(group.items) { achievement in
+                        CardHubAchievementRow(achievement: achievement) {
+                            Menu("Escolher pack · 5 cartas") {
+                                ForEach(model.artists.filter { model.dashboard.favoriteArtists.contains($0.artistKey) }) { artist in
+                                    Button(artist.artistName) {
+                                        Task { await model.claim(achievement, artistKey: artist.artistKey, repository: container.repository) }
+                                    }
+                                }
+                                Button("Escolher favoritos…") { showingFavorites = true }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var achievementGroups: [CardHubAchievementGroup] {
+        let order = ["Coleção", "Audição", "Jornada", "Packs", "Trocas", "Comunidade"]
+        let grouped = Dictionary(grouping: model.achievements, by: \.categoryTitle)
+        return grouped.keys.sorted {
+            let leftIndex = order.firstIndex(of: $0) ?? Int.max
+            let rightIndex = order.firstIndex(of: $1) ?? Int.max
+            if leftIndex != rightIndex { return leftIndex < rightIndex }
+            return $0.localizedStandardCompare($1) == .orderedAscending
+        }.map { title in
+            let emoji: String
+            switch title {
+            case "Coleção": emoji = "💿"
+            case "Audição": emoji = "🎧"
+            case "Jornada": emoji = "🔥"
+            case "Packs": emoji = "📦"
+            case "Trocas": emoji = "🤝"
+            case "Comunidade": emoji = "🌐"
+            default: emoji = "🏅"
+            }
+            return CardHubAchievementGroup(title: title, emoji: emoji, items: grouped[title] ?? [])
         }
     }
 
@@ -394,8 +594,18 @@ struct CardsHubView: View {
                 ForEach(model.trades) { trade in
                     VStack(alignment: .leading, spacing: 9) {
                         HStack { Text("@\(trade.counterpartyUsername)").font(.headline); Spacer(); Text(trade.status.uppercased()).font(.caption2.bold()).foregroundStyle(YePlyTheme.accent) }
-                        Text("Você oferece: \(trade.offeredTitles.joined(separator: ", "))").font(.caption).foregroundStyle(YePlyTheme.secondary)
-                        Text("Você recebe: \(trade.requestedTitles.joined(separator: ", "))").font(.caption).foregroundStyle(YePlyTheme.secondary)
+                        TradeSummaryLine(
+                            title: "Você oferece",
+                            cardTitles: trade.offeredTitles,
+                            coins: trade.offeredCoins ?? 0,
+                            tint: .orange
+                        )
+                        TradeSummaryLine(
+                            title: "Você recebe",
+                            cardTitles: trade.requestedTitles,
+                            coins: trade.requestedCoins ?? 0,
+                            tint: .green
+                        )
                         if trade.canRespond && trade.status == "pending" {
                             HStack {
                                 Button("Recusar", role: .destructive) { Task { await model.respond(trade, accept: false, repository: container.repository) } }.buttonStyle(.bordered)
@@ -407,6 +617,233 @@ struct CardsHubView: View {
                 }
             }
         }
+    }
+}
+
+private struct CardHubAchievementGroup: Identifiable {
+    let title: String
+    let emoji: String
+    let items: [CardAchievement]
+    var id: String { title }
+}
+
+private struct CardHubAchievementRow<ClaimMenu: View>: View {
+    let achievement: CardAchievement
+    let claimMenu: () -> ClaimMenu
+
+    init(achievement: CardAchievement, @ViewBuilder claimMenu: @escaping () -> ClaimMenu) {
+        self.achievement = achievement
+        self.claimMenu = claimMenu
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text(achievement.displayEmoji)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
+                    .background(YePlyTheme.elevatedStrong, in: Circle())
+                    .saturation(achievement.isUnlocked ? 1 : 0)
+                    .opacity(achievement.isUnlocked ? 1 : 0.55)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(achievement.title).font(.headline)
+                    Text(achievement.description).font(.caption).foregroundStyle(YePlyTheme.secondary)
+                }
+                Spacer()
+            }
+            ProgressView(value: achievement.completion)
+                .tint(achievement.isUnlocked ? .green : YePlyTheme.accent)
+            HStack {
+                Text("\(min(achievement.progress, achievement.target).formatted()) / \(achievement.target.formatted())")
+                    .font(.caption2).foregroundStyle(YePlyTheme.tertiary)
+                Spacer()
+                if achievement.canClaimReward {
+                    claimMenu().font(.caption.bold()).foregroundStyle(YePlyTheme.accent)
+                } else if achievement.rewardClaimedAt != nil {
+                    Label("Resgatada", systemImage: "checkmark.circle.fill")
+                        .font(.caption.bold()).foregroundStyle(.green)
+                }
+            }
+        }
+        .padding(14)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17))
+    }
+}
+
+private struct CardStoreHero: View {
+    let balance: Int
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 27, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [YePlyTheme.accent.opacity(0.92), Color.purple.opacity(0.72), Color.black.opacity(0.94)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Circle().fill(.white.opacity(0.13)).frame(width: 150).blur(radius: 4).offset(x: 115, y: -58)
+            Circle().fill(YePlyTheme.accent.opacity(0.24)).frame(width: 190).blur(radius: 25).offset(x: -105, y: 90)
+
+            VStack(alignment: .leading, spacing: 15) {
+                HStack {
+                    Label("YEPLY VAULT", systemImage: "sparkles")
+                        .font(.caption2.bold()).tracking(1.6)
+                    Spacer()
+                    Image(systemName: "lock.shield.fill").font(.title3)
+                }
+                .foregroundStyle(.white.opacity(0.82))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Seu saldo").font(.caption).foregroundStyle(.white.opacity(0.66))
+                    Text(balance.formatted())
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .contentTransition(.numericText())
+                    Text("MOEDAS").font(.caption2.bold()).tracking(2).foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .padding(20)
+        }
+        .frame(height: 178)
+        .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 27).stroke(.white.opacity(0.13)))
+    }
+}
+
+private struct CardStoreProductTile: View {
+    let product: CardPackStoreProduct
+    let balance: Int
+    let isBuying: Bool
+    let onBuy: () -> Void
+
+    private var canBuy: Bool { balance >= product.price && !isBuying }
+
+    private var palette: [Color] {
+        if let accentHex = product.accentHex, let color = Color(yeplyHex: accentHex) {
+            return [color, color.opacity(0.48), .black]
+        }
+        switch product.productKey {
+        case .common: [Color.blue.opacity(0.64), Color.black]
+        case .epic: [Color.purple.opacity(0.8), Color.black]
+        case .favoriteArtists: [Color.pink.opacity(0.8), Color.purple.opacity(0.45)]
+        case .booster: [YePlyTheme.accent, Color.orange.opacity(0.6), Color.black]
+        case .mythicBoost: [Color(red: 0.9, green: 0.15, blue: 0.45), Color.purple.opacity(0.8), Color.black]
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .top) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .fill(.white.opacity(0.14))
+                    if let emoji = product.emoji, !emoji.isEmpty {
+                        Text(emoji).font(.title2)
+                    } else {
+                        Image(systemName: product.productKey.symbolName)
+                            .font(.title2.bold()).foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 50, height: 50)
+                Spacer()
+                Text("\(product.cardCount)x")
+                    .font(.caption.monospacedDigit().bold())
+                    .padding(.horizontal, 9).frame(height: 27)
+                    .background(.black.opacity(0.28), in: Capsule())
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(product.title).font(.headline).lineLimit(1)
+                Text(product.subtitle)
+                    .font(.caption).foregroundStyle(.white.opacity(0.67))
+                    .lineLimit(2)
+                    .frame(minHeight: 34, alignment: .top)
+            }
+
+            Button(action: onBuy) {
+                HStack(spacing: 7) {
+                    if isBuying { ProgressView().tint(.black) }
+                    Image(systemName: "yensign.circle.fill")
+                    Text(product.price.formatted()).monospacedDigit()
+                }
+                .font(.subheadline.bold())
+                .foregroundStyle(canBuy ? .black : .white.opacity(0.5))
+                .frame(maxWidth: .infinity).frame(height: 40)
+                .background(canBuy ? Color.white : Color.black.opacity(0.3), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canBuy)
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, minHeight: 204, alignment: .topLeading)
+        .background(
+            LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 23, style: .continuous)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 23).stroke(.white.opacity(0.12)))
+    }
+}
+
+private struct CardWishlistRow: View {
+    let item: CardWishlistItem
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CardBrowserArtwork(
+                path: item.artworkPath,
+                seed: item.definitionId.uuidString,
+                title: item.title,
+                albumName: item.albumName,
+                tint: item.rarity.accentColor,
+                cornerRadius: 14
+            )
+            .frame(width: 62, height: 62)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title).font(.subheadline.bold()).lineLimit(1)
+                Text("\(item.artistName) · \(item.albumName)")
+                    .font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+                Label(item.rarity.title, systemImage: item.rarity.symbolName)
+                    .font(.caption2.bold()).foregroundStyle(item.rarity.accentColor)
+            }
+            Spacer()
+            Button(action: onRemove) {
+                Image(systemName: "heart.fill")
+                    .font(.headline).foregroundStyle(YePlyTheme.accent)
+                    .frame(width: 40, height: 40)
+                    .background(YePlyTheme.accent.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remover \(item.title) da lista de desejos")
+        }
+        .padding(11)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct TradeSummaryLine: View {
+    let title: String
+    let cardTitles: [String]
+    let coins: Int
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased()).font(.caption2.bold()).tracking(1).foregroundStyle(tint)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(cardTitles.isEmpty ? "Nenhuma carta" : cardTitles.joined(separator: ", "))
+                    .font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(2)
+                if coins > 0 {
+                    Spacer(minLength: 4)
+                    Label(coins.formatted(), systemImage: "yensign.circle.fill")
+                        .font(.caption2.bold()).foregroundStyle(YePlyTheme.accent)
+                }
+            }
+        }
+        .padding(10)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -736,7 +1173,7 @@ struct CardProfileShowcaseView: View {
 
     @ViewBuilder
     private var albumBadgesSection: some View {
-        sectionTitle("Badges de álbuns", detail: "Escolha até três posições no seu perfil")
+        sectionTitle("Badges de álbuns", detail: "Escolha até quatro posições no seu perfil")
         if completedAlbums.isEmpty {
             ContentUnavailableView(
                 "Nenhuma badge ainda",
@@ -809,7 +1246,7 @@ private struct CardAlbumBadgeRow: View {
             }
             Spacer()
             Menu {
-                ForEach(1...3, id: \.self) { slot in
+                ForEach(1...4, id: \.self) { slot in
                     Button("Posição \(slot)") { onEquip(slot) }
                 }
             } label: {
@@ -850,9 +1287,10 @@ private struct CardAchievementProgressRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: achievement.symbolName)
+            Text(achievement.displayEmoji)
                 .font(.title3)
-                .foregroundStyle(achievement.isUnlocked ? YePlyTheme.accent : YePlyTheme.tertiary)
+                .saturation(achievement.isUnlocked ? 1 : 0)
+                .opacity(achievement.isUnlocked ? 1 : 0.55)
                 .frame(width: 36, height: 36)
                 .background(YePlyTheme.elevatedStrong, in: Circle())
             VStack(alignment: .leading, spacing: 4) {
@@ -890,7 +1328,7 @@ private struct CreatePackCodeView: View {
         NavigationStack {
             Form {
                 Section("Código") {
-                    TextField("Ex.: YEPLY-KANYE-01", text: $code)
+                    TextField("Ex.: BETA!", text: $code)
                         .textInputAutocapitalization(.characters).autocorrectionDisabled()
                     TextField("Descrição opcional", text: $label)
                 }
@@ -914,7 +1352,7 @@ private struct CreatePackCodeView: View {
             .navigationTitle("Novo código de pack").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button(isWorking ? "Criando…" : "Criar") { create() }.disabled(cleanCode.count < 6 || isWorking) }
+                ToolbarItem(placement: .confirmationAction) { Button(isWorking ? "Criando…" : "Criar") { create() }.disabled(cleanCode.count < 3 || isWorking) }
             }
             .alert("Não foi possível criar", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -950,61 +1388,249 @@ private struct CreateCardTradeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var container: AppContainer
     let ownCards: [CollectibleCardItem]
+    let coinBalance: Int
     let onCreated: () -> Void
     @State private var username = ""
     @State private var profile: UserProfile?
     @State private var theirCards: [CollectibleCardItem] = []
     @State private var offered: Set<UUID> = []
     @State private var requested: Set<UUID> = []
+    @State private var offeredCoins = 0
+    @State private var requestedCoins = 0
+    @State private var selectionSide: TradeSelectionSide = .offered
+    @State private var ownQuery = ""
+    @State private var theirQuery = ""
+    @State private var ownSort: CardTradeSort = .newest
+    @State private var theirSort: CardTradeSort = .newest
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Usuário") {
-                    HStack { TextField("@username", text: $username).textInputAutocapitalization(.never).autocorrectionDisabled(); Button("Buscar") { search() }.disabled(username.isEmpty || isWorking) }
-                    if let profile { Label("@\(profile.username) · \(profile.displayName)", systemImage: "person.crop.circle.fill").foregroundStyle(YePlyTheme.accent) }
-                }
-                if profile != nil {
-                    cardSelectionSection("Suas cartas oferecidas", cards: ownCards, selection: $offered)
-                    cardSelectionSection("Cartas que você quer", cards: theirCards, selection: $requested)
+            VStack(spacing: 0) {
+                recipientSearch
+
+                if profile == nil {
+                    ContentUnavailableView(
+                        "Encontre quem vai trocar",
+                        systemImage: "person.2.badge.gearshape.fill",
+                        description: Text("Busque pelo @ do usuário para comparar as duas coleções.")
+                    )
+                    .frame(maxHeight: .infinity)
+                } else {
+                    Picker("Lado da troca", selection: $selectionSide) {
+                        ForEach(TradeSelectionSide.allCases) { side in Text(side.title).tag(side) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+
+                    tradeSelectionContent
                 }
             }
-            .scrollContentBackground(.hidden).background(YePlyTheme.background)
-            .navigationTitle("Nova troca").navigationBarTitleDisplayMode(.inline)
+            .background(YePlyTheme.background)
+            .navigationTitle("Montar troca").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Enviar") { create() }.disabled(profile == nil || offered.isEmpty || requested.isEmpty || isWorking) }
             }
+            .safeAreaInset(edge: .bottom) { tradeFooter }
             .alert("Troca", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") {} } message: { Text(errorMessage ?? "") }
         }
     }
 
-    private func cardSelectionSection(_ title: String, cards: [CollectibleCardItem], selection: Binding<Set<UUID>>) -> some View {
-        Section(title) {
-            ForEach(cards) { card in
-                Button {
-                    var updated = selection.wrappedValue
-                    if updated.contains(card.id) { updated.remove(card.id) }
-                    else if updated.count < 5 { updated.insert(card.id) }
-                    selection.wrappedValue = updated
+    private var recipientSearch: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 9) {
+                Image(systemName: "at").foregroundStyle(YePlyTheme.secondary)
+                TextField("username", text: $username)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .submitLabel(.search).onSubmit { search() }
+                Button("Buscar", action: search).font(.subheadline.bold())
+                    .disabled(username.trimmingCharacters(in: .whitespaces).isEmpty || isWorking)
+            }
+            .padding(.horizontal, 13).frame(height: 46)
+            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 14))
+
+            if let profile {
+                HStack {
+                    Image(systemName: "person.crop.circle.fill").font(.title2).foregroundStyle(YePlyTheme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.displayName).font(.subheadline.bold())
+                        Text("@\(profile.username) · \(theirCards.count) cartas negociáveis")
+                            .font(.caption).foregroundStyle(YePlyTheme.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                }
+            }
+        }
+        .padding(16)
+        .background(YePlyTheme.background)
+    }
+
+    @ViewBuilder private var tradeSelectionContent: some View {
+        let isOwn = selectionSide == .offered
+        let query = isOwn ? ownQuery : theirQuery
+        let sort = isOwn ? ownSort : theirSort
+        let sourceCards = isOwn ? ownCards : theirCards
+        let visibleCards = filteredCards(sourceCards, query: query, sort: sort)
+
+        VStack(spacing: 10) {
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass").foregroundStyle(YePlyTheme.secondary)
+                TextField("Música, artista ou álbum", text: isOwn ? $ownQuery : $theirQuery)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Menu {
+                    ForEach(CardTradeSort.allCases) { option in
+                        Button {
+                            if isOwn { ownSort = option } else { theirSort = option }
+                        } label: {
+                            if sort == option { Label(option.title, systemImage: "checkmark") }
+                            else { Text(option.title) }
+                        }
+                    }
                 } label: {
-                    HStack { Text(card.title).foregroundStyle(.white); Spacer(); Text(card.rarity.title).font(.caption).foregroundStyle(YePlyTheme.secondary); Image(systemName: selection.wrappedValue.contains(card.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(YePlyTheme.accent) }
-                }.buttonStyle(.plain)
+                    Image(systemName: "arrow.up.arrow.down.circle.fill").font(.title3)
+                }
+            }
+            .padding(.horizontal, 13).frame(height: 44)
+            .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 16)
+
+            coinSelector(isOwn: isOwn)
+                .padding(.horizontal, 16)
+
+            ScrollView {
+                LazyVStack(spacing: 9) {
+                    ForEach(visibleCards) { card in
+                        let blocked = isBlocked(card, onOwnSide: isOwn)
+                        CardTradeSelectionRow(
+                            card: card,
+                            isSelected: (isOwn ? offered : requested).contains(card.id),
+                            isBlocked: blocked,
+                            blockedReason: blocked ? (isOwn ? "O usuário já possui esta carta" : "Você já possui esta carta") : nil
+                        ) {
+                            toggle(card: card, onOwnSide: isOwn)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 110)
             }
         }
     }
 
+    private func coinSelector(isOwn: Bool) -> some View {
+        let amount = isOwn ? offeredCoins : requestedCoins
+        let limit = isOwn ? coinBalance : 500_000
+        return HStack(spacing: 11) {
+            Image(systemName: "yensign.circle.fill").font(.title3).foregroundStyle(YePlyTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isOwn ? "Moedas que você oferece" : "Moedas que você pede").font(.caption.bold())
+                Text(isOwn ? "Saldo: \(coinBalance.formatted())" : "Opcional na proposta")
+                    .font(.caption2).foregroundStyle(YePlyTheme.secondary)
+            }
+            Spacer()
+            Button { setCoins(max(0, amount - 1_000), isOwn: isOwn) } label: { Image(systemName: "minus.circle.fill") }
+                .disabled(amount == 0)
+            Text(amount.formatted()).font(.subheadline.monospacedDigit().bold()).frame(minWidth: 62)
+            Button { setCoins(min(limit, amount + 1_000), isOwn: isOwn) } label: { Image(systemName: "plus.circle.fill") }
+                .disabled(amount >= limit)
+        }
+        .padding(12)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
+    private var tradeFooter: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("\(offered.count) cartas + \(offeredCoins.formatted()) moedas")
+                Spacer()
+                Image(systemName: "arrow.right")
+                Spacer()
+                Text("\(requested.count) cartas + \(requestedCoins.formatted()) moedas")
+            }
+            .font(.caption2.bold()).foregroundStyle(YePlyTheme.secondary)
+            Button(action: create) {
+                if isWorking { ProgressView().tint(.black) }
+                else { Label("Enviar proposta", systemImage: "paperplane.fill") }
+            }
+            .font(.headline).foregroundStyle(.black)
+            .frame(maxWidth: .infinity).frame(height: 50)
+            .background(YePlyTheme.accent, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .disabled(!canSubmit)
+            .opacity(canSubmit ? 1 : 0.45)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+    }
+
+    private var canSubmit: Bool {
+        guard profile != nil, !isWorking else { return false }
+        return (!offered.isEmpty || offeredCoins > 0) && (!requested.isEmpty || requestedCoins > 0)
+    }
+
+    private func filteredCards(_ cards: [CollectibleCardItem], query: String, sort: CardTradeSort) -> [CollectibleCardItem] {
+        let unique = Dictionary(grouping: cards, by: \.definitionId).compactMap { $0.value.min { $0.serialNumber < $1.serialNumber } }
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = unique.filter {
+            clean.isEmpty || $0.title.localizedCaseInsensitiveContains(clean)
+                || $0.artistName.localizedCaseInsensitiveContains(clean)
+                || $0.albumName.localizedCaseInsensitiveContains(clean)
+        }
+        return filtered.sorted { left, right in
+            switch sort {
+            case .newest: return (left.acquiredAt ?? .distantPast) > (right.acquiredAt ?? .distantPast)
+            case .title: return left.title.localizedStandardCompare(right.title) == .orderedAscending
+            case .artist: return left.artistName.localizedStandardCompare(right.artistName) == .orderedAscending
+            case .album: return left.albumName.localizedStandardCompare(right.albumName) == .orderedAscending
+            case .rarity: return rarityRank(left.rarity) > rarityRank(right.rarity)
+            }
+        }
+    }
+
+    private func rarityRank(_ rarity: CollectibleCardRarity) -> Int {
+        switch rarity {
+        case .common, .rare: 0
+        case .epic, .legendary: 1
+        case .mythic: 2
+        }
+    }
+
+    private func isBlocked(_ card: CollectibleCardItem, onOwnSide: Bool) -> Bool {
+        let otherDefinitions = Set((onOwnSide ? theirCards : ownCards).map(\.definitionId))
+        return otherDefinitions.contains(card.definitionId)
+    }
+
+    private func toggle(card: CollectibleCardItem, onOwnSide: Bool) {
+        guard !isBlocked(card, onOwnSide: onOwnSide) else { return }
+        if onOwnSide {
+            if offered.contains(card.id) { offered.remove(card.id) }
+            else if offered.count < 5 { offered.insert(card.id) }
+        } else {
+            if requested.contains(card.id) { requested.remove(card.id) }
+            else if requested.count < 5 { requested.insert(card.id) }
+        }
+    }
+
+    private func setCoins(_ amount: Int, isOwn: Bool) {
+        if isOwn { offeredCoins = amount } else { requestedCoins = amount }
+    }
+
     private func search() {
         isWorking = true
+        profile = nil
+        theirCards = []
+        offered.removeAll()
+        requested.removeAll()
         Task {
             defer { isWorking = false }
             do {
                 let clean = username.trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
                 let profiles = try await container.repository.searchProfiles(query: clean)
                 guard let match = profiles.first(where: { $0.username.localizedCaseInsensitiveCompare(clean) == .orderedSame }) else { throw YePlyError.message("Usuário não encontrado.") }
-                profile = match; theirCards = try await container.repository.fetchTradeableCards(username: match.username)
+                profile = match
+                theirCards = try await container.repository.fetchTradeableCards(username: match.username)
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -1014,8 +1640,94 @@ private struct CreateCardTradeView: View {
         isWorking = true
         Task {
             defer { isWorking = false }
-            do { _ = try await container.repository.createCardTrade(receiverID: profile.id, offeredCardIDs: Array(offered), requestedCardIDs: Array(requested)); onCreated(); dismiss() }
+            do {
+                _ = try await container.repository.createCardTrade(
+                    receiverID: profile.id,
+                    offeredCardIDs: Array(offered),
+                    requestedCardIDs: Array(requested),
+                    offeredCoins: offeredCoins,
+                    requestedCoins: requestedCoins
+                )
+                onCreated()
+                dismiss()
+            }
             catch { errorMessage = error.localizedDescription }
         }
+    }
+}
+
+private enum TradeSelectionSide: String, CaseIterable, Identifiable {
+    case offered, requested
+    var id: String { rawValue }
+    var title: String { self == .offered ? "Você entrega" : "Você recebe" }
+}
+
+private enum CardTradeSort: String, CaseIterable, Identifiable {
+    case newest, title, artist, album, rarity
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .newest: "Mais recentes"
+        case .title: "Nome"
+        case .artist: "Artista"
+        case .album: "Álbum"
+        case .rarity: "Raridade"
+        }
+    }
+}
+
+private struct CardTradeSelectionRow: View {
+    let card: CollectibleCardItem
+    let isSelected: Bool
+    let isBlocked: Bool
+    let blockedReason: String?
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 11) {
+                CardBrowserArtwork(
+                    path: card.artworkPath,
+                    seed: card.definitionId.uuidString,
+                    title: card.title,
+                    albumName: card.albumName,
+                    tint: card.rarity.accentColor,
+                    cornerRadius: 12
+                )
+                .frame(width: 54, height: 54)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(card.title).font(.subheadline.bold()).lineLimit(1)
+                    Text("\(card.artistName) · \(card.albumName)")
+                        .font(.caption).foregroundStyle(YePlyTheme.secondary).lineLimit(1)
+                    if let blockedReason {
+                        Text(blockedReason).font(.caption2.bold()).foregroundStyle(.orange)
+                    } else {
+                        Label(card.rarity.title, systemImage: card.rarity.symbolName)
+                            .font(.caption2.bold()).foregroundStyle(card.rarity.accentColor)
+                    }
+                }
+                Spacer()
+                Image(systemName: isBlocked ? "lock.fill" : (isSelected ? "checkmark.circle.fill" : "circle"))
+                    .font(.title3).foregroundStyle(isSelected ? YePlyTheme.accent : YePlyTheme.tertiary)
+            }
+            .padding(10)
+            .background(isSelected ? YePlyTheme.accent.opacity(0.10) : YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(isSelected ? YePlyTheme.accent.opacity(0.8) : .clear))
+            .opacity(isBlocked ? 0.52 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(isBlocked)
+    }
+}
+
+private extension Color {
+    init?(yeplyHex: String) {
+        let clean = yeplyHex.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        guard clean.count == 6, let value = UInt64(clean, radix: 16) else { return nil }
+        self.init(
+            red: Double((value >> 16) & 0xff) / 255,
+            green: Double((value >> 8) & 0xff) / 255,
+            blue: Double(value & 0xff) / 255
+        )
     }
 }

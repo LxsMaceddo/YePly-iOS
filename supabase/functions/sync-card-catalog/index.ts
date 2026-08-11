@@ -25,7 +25,7 @@ const canonicalReleaseDates = new Map<string, string>([
   ["2Ek1q2haOnxVqhvVKqMvJe", "2018-06-01"],
   ["1oK1GzEMNDjCt7EYYpomwc", "2018-06-08"],
   ["0FgZKfoU2Br5sHOfvZKTI9", "2019-10-25"],
-  ["5CnpZV3q5BcESefcB3WJmz", "2021-08-29"],
+  ["2Wiyo7LzdeBCsVZiRA6vVZ", "2021-11-14"],
   ["0k7oanYS9dXYWLXaFOYxJ8", "2022-02-23"],
   ["0k7ALIqqds5oGFtpMsaHLK", "2024-02-10"],
   ["5RV2TNyjylqWJNxQyHBTeJ", "2024-08-03"],
@@ -74,7 +74,7 @@ const knownArtists: KnownArtist[] = [
       { releaseGroupMBID: "6448381d-9d98-4f84-b99d-733b6acde906", spotifyAlbumID: "2Ek1q2haOnxVqhvVKqMvJe", title: "ye", expectedTrackCount: 7 },
       { releaseGroupMBID: "3346a9d9-031e-49e2-84b0-3734d790d7e5", spotifyAlbumID: "1oK1GzEMNDjCt7EYYpomwc", title: "KIDS SEE GHOSTS", expectedTrackCount: 7 },
       { releaseGroupMBID: "ee26718c-2633-4278-8718-f3a45a95f20e", spotifyAlbumID: "0FgZKfoU2Br5sHOfvZKTI9", title: "JESUS IS KING", expectedTrackCount: 11 },
-      { releaseGroupMBID: "7f4792fe-b563-4554-849a-95a89be71f84", spotifyAlbumID: "5CnpZV3q5BcESefcB3WJmz", title: "Donda", expectedTrackCount: 27 },
+      { releaseGroupMBID: "7f4792fe-b563-4554-849a-95a89be71f84", spotifyAlbumID: "2Wiyo7LzdeBCsVZiRA6vVZ", title: "Donda (Deluxe)", expectedTrackCount: 32 },
       { releaseGroupMBID: "26584460-df1f-4a91-b036-8d0bf6f8ce95", spotifyAlbumID: "0k7oanYS9dXYWLXaFOYxJ8", title: "DONDA 2", expectedTrackCount: 20 },
       { releaseGroupMBID: "c4d999c3-983d-4149-8580-9ccb4567a12a", spotifyAlbumID: "0k7ALIqqds5oGFtpMsaHLK", title: "VULTURES 1", expectedTrackCount: 16 },
       { releaseGroupMBID: "d69250da-c94d-436d-bacf-7e52da48bc68", spotifyAlbumID: "5RV2TNyjylqWJNxQyHBTeJ", title: "VULTURES 2", expectedTrackCount: 16 },
@@ -171,6 +171,18 @@ type ImportedAlbum = {
   spotify_url: string;
   musicbrainz_release_group_id?: string;
   tracks: ImportedTrack[];
+};
+
+type ArtworkStorageClient = {
+  storage: {
+    from: (bucket: string) => {
+      upload: (
+        path: string,
+        data: Uint8Array,
+        options: { contentType: string; cacheControl: string; upsert: boolean },
+      ) => PromiseLike<{ error: unknown }>;
+    };
+  };
 };
 
 type MBReferenceTrack = {
@@ -321,7 +333,42 @@ function shouldImportDiscoveredAlbum(album: SpotifyAlbumSummary, artist: KnownAr
   if (key.startsWith("late orchestration")) return false;
   if (key.startsWith("bully") && !key.includes("deluxe")) return false;
   if (key.startsWith("watch the throne") && !key.includes("deluxe")) return false;
+  if (key.startsWith("donda") && !key.includes("deluxe") && !key.startsWith("donda 2")) return false;
   return true;
+}
+
+async function mirrorAlbumArtwork(
+  album: ImportedAlbum,
+  serviceClient: ArtworkStorageClient,
+): Promise<void> {
+  const sourceURL = album.artwork_url.trim();
+  if (!sourceURL.startsWith("https://")) return;
+  try {
+    const response = await fetchWithRetry(sourceURL, {
+      headers: { Accept: "image/jpeg,image/png,image/webp" },
+    }, 2);
+    const contentType = (response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+    if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+      throw new Error(`unsupported_artwork_type:${contentType}`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length < 512 || bytes.length > 10 * 1024 * 1024) {
+      throw new Error(`invalid_artwork_size:${bytes.length}`);
+    }
+    const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+    const path = `catalog/spotify/${album.spotify_album_id}.${extension}`;
+    const { error } = await serviceClient.storage.from("covers").upload(path, bytes, {
+      contentType,
+      cacheControl: "31536000",
+      upsert: true,
+    });
+    if (error) throw error;
+    album.artwork_url = path;
+  } catch (error) {
+    // A Spotify URL is still a valid fallback. A temporary storage failure must
+    // never make the whole official-discography synchronization fail.
+    console.warn(`artwork_mirror_unavailable:${album.title}`, error);
+  }
 }
 
 function chooseDiscoveredAlbums(items: SpotifyAlbumSummary[], artist: KnownArtist): SpotifyAlbumSummary[] {
@@ -599,6 +646,15 @@ Deno.serve(async (request) => {
     const supabaseURL = Deno.env.get("SUPABASE_URL");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
     if (!supabaseURL || !anonKey) throw new Error("missing_supabase_environment");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
+    if (serviceRoleKey) {
+      const serviceClient = createClient(supabaseURL, serviceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      for (const album of albums) await mirrorAlbumArtwork(album, serviceClient);
+    } else {
+      console.warn("artwork_mirror_disabled:SUPABASE_SERVICE_ROLE_KEY_missing");
+    }
     const supabase = createClient(supabaseURL, anonKey, {
       global: { headers: { Authorization: authorization } },
       auth: { persistSession: false, autoRefreshToken: false },

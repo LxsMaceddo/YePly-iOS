@@ -260,7 +260,13 @@ struct YePlyPackOpeningView: View {
     }
 
     private var summarySubtitle: String {
-        cards.count == 1 ? "1 nova carta na sua coleção" : "\(cards.count) novas cartas na sua coleção"
+        let converted = cards.filter { $0.convertedToCoins == true }.count
+        let saved = cards.count - converted
+        if converted > 0 {
+            let coins = cards.compactMap(\.coinsAwarded).reduce(0, +)
+            return "\(saved) guardadas · \(converted) repetidas viraram \(coins.formatted()) moedas"
+        }
+        return saved == 1 ? "1 nova carta na sua coleção" : "\(saved) novas cartas na sua coleção"
     }
 
     private func preloadArtwork() async {
@@ -370,7 +376,7 @@ struct YePlyBulkPackOpeningView: View {
                     .font(.caption2.bold())
                     .tracking(1.8)
                     .foregroundStyle(YePlyTheme.accent)
-                Text("\(allCards.count) cartas encontradas")
+                Text("\(allCards.count) resultados encontrados")
                     .font(.title2.bold())
                 raritySummary
             }
@@ -495,16 +501,25 @@ private struct ResolvedPackCard: View {
         self.card = card
         self.style = style
         self.artworkResolver = artworkResolver
-        let directURL = card.artworkPath
-            .flatMap { URL(string: $0) }
-            .flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
-        _artworkURL = State(initialValue: directURL)
+        _artworkURL = State(initialValue: nil)
     }
 
     var body: some View {
-        CollectibleCardView(model: displayModel, style: style)
+        VStack(spacing: 8) {
+            CollectibleCardView(model: displayModel, style: style)
+            if card.convertedToCoins == true {
+                Label(
+                    "+\((card.coinsAwarded ?? 0).formatted()) moedas · limite de 2 cópias",
+                    systemImage: "arrow.triangle.2.circlepath.circle.fill"
+                )
+                .font(.caption.bold())
+                .foregroundStyle(.black)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 34)
+                .background(YePlyTheme.accent, in: Capsule())
+            }
+        }
             .task(id: card.artworkPath) {
-                if artworkURL != nil { return }
                 artworkURL = await artworkResolver(card)
             }
     }

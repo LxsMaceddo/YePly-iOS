@@ -255,6 +255,7 @@ private struct CardCollectionBrowserRow: View {
                 path: card.artworkPath,
                 seed: card.definitionId.uuidString,
                 title: card.title,
+                albumName: card.albumName,
                 tint: card.rarity.accentColor,
                 cornerRadius: 14
             )

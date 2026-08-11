@@ -14,6 +14,19 @@ private struct CardInventoryPageInput: Encodable {
     let pLimit: Int
     enum CodingKeys: String, CodingKey { case pOffset = "p_offset"; case pLimit = "p_limit" }
 }
+private struct CardCatalogPageInput: Encodable {
+    let pOffset: Int
+    let pLimit: Int
+    enum CodingKeys: String, CodingKey { case pOffset = "p_offset"; case pLimit = "p_limit" }
+}
+private struct CardDefinitionInput: Encodable {
+    let pDefinitionId: UUID
+    enum CodingKeys: String, CodingKey { case pDefinitionId = "p_definition_id" }
+}
+private struct CardPackPurchaseInput: Encodable {
+    let pProductKey: String
+    enum CodingKeys: String, CodingKey { case pProductKey = "p_product_key" }
+}
 private struct UserFollowInput: Encodable { let pUserId: UUID; enum CodingKeys: String, CodingKey { case pUserId = "p_user_id" } }
 private struct PlaylistIDInput: Encodable { let pPlaylistId: UUID; enum CodingKeys: String, CodingKey { case pPlaylistId = "p_playlist_id" } }
 private struct TrackIDInput: Encodable { let pTrackId: UUID; enum CodingKeys: String, CodingKey { case pTrackId = "p_track_id" } }
@@ -72,6 +85,10 @@ private struct CardBadgeInput: Encodable {
     let pSlot: Int
     enum CodingKeys: String, CodingKey { case pBadgeId = "p_badge_id"; case pSlot = "p_slot" }
 }
+private struct FeaturedCardInput: Encodable {
+    let pInstanceId: UUID?
+    enum CodingKeys: String, CodingKey { case pInstanceId = "p_instance_id" }
+}
 private struct CardAchievementInput: Encodable {
     let pAchievementKey: String
     let pArtistKey: String
@@ -81,10 +98,14 @@ private struct CardTradeInput: Encodable {
     let pRecipientId: UUID
     let pOfferedIds: [UUID]
     let pRequestedIds: [UUID]
+    let pOfferedCoins: Int
+    let pRequestedCoins: Int
     enum CodingKeys: String, CodingKey {
         case pRecipientId = "p_recipient_id"
         case pOfferedIds = "p_offered_ids"
         case pRequestedIds = "p_requested_ids"
+        case pOfferedCoins = "p_offered_coins"
+        case pRequestedCoins = "p_requested_coins"
     }
 }
 private struct CardTradeResponseInput: Encodable {
@@ -324,7 +345,23 @@ actor SupabaseMusicRepository: MusicRepository {
     }
 
     func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem] {
-        try await client.rpc("card_album_catalog_feed").execute().value
+        let pageSize = 500
+        var offset = 0
+        var result: [CardAlbumCatalogItem] = []
+        do {
+            while true {
+                let page: [CardAlbumCatalogItem] = try await client.rpc(
+                    "card_album_catalog_feed_page",
+                    params: CardCatalogPageInput(pOffset: offset, pLimit: pageSize)
+                ).execute().value
+                result.append(contentsOf: page)
+                if page.count < pageSize { return result }
+                offset += page.count
+            }
+        } catch {
+            // Compatibilidade com backends anteriores durante a migração do feed paginado.
+            return try await client.rpc("card_album_catalog_feed").execute().value
+        }
     }
 
     func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge] {
@@ -332,6 +369,21 @@ actor SupabaseMusicRepository: MusicRepository {
             "profile_equipped_card_badges",
             params: ProfileIDInput(pProfileId: profileID)
         ).execute().value
+    }
+
+    func fetchOwnedProfileBadges(profileID: UUID) async throws -> [ProfileCollectibleBadge] {
+        try await client.rpc(
+            "profile_owned_badges",
+            params: ProfileIDInput(pProfileId: profileID)
+        ).execute().value
+    }
+
+    func fetchFeaturedProfileCard(profileID: UUID) async throws -> CollectibleCardItem? {
+        let cards: [CollectibleCardItem] = try await client.rpc(
+            "profile_featured_card",
+            params: ProfileIDInput(pProfileId: profileID)
+        ).execute().value
+        return cards.first
     }
 
     func fetchCardAchievements() async throws -> [CardAchievement] {
@@ -349,6 +401,28 @@ actor SupabaseMusicRepository: MusicRepository {
 
     func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem] {
         try await client.rpc("card_tradeable_inventory", params: CardTradeableInput(pUsername: username)).execute().value
+    }
+
+    func fetchCardWishlist() async throws -> [CardWishlistItem] {
+        try await client.rpc("card_wishlist_feed").execute().value
+    }
+
+    func toggleCardWishlist(definitionID: UUID) async throws -> CardRewardResult {
+        try await client.rpc(
+            "toggle_card_wishlist",
+            params: CardDefinitionInput(pDefinitionId: definitionID)
+        ).execute().value
+    }
+
+    func fetchCardPackStore() async throws -> [CardPackStoreProduct] {
+        try await client.rpc("card_pack_store").execute().value
+    }
+
+    func buyCardPack(product: CardPackProductKind) async throws -> CardRewardResult {
+        try await client.rpc(
+            "buy_card_pack",
+            params: CardPackPurchaseInput(pProductKey: product.rawValue)
+        ).execute().value
     }
 
     func claimDailyCardReward() async throws -> CardRewardResult {
@@ -413,12 +487,28 @@ actor SupabaseMusicRepository: MusicRepository {
         try await client.rpc("equip_card_badge", params: CardBadgeInput(pBadgeId: id, pSlot: slot)).execute().value
     }
 
+    func setFeaturedProfileCard(instanceID: UUID?) async throws -> CardRewardResult {
+        try await client.rpc(
+            "set_profile_featured_card",
+            params: FeaturedCardInput(pInstanceId: instanceID)
+        ).execute().value
+    }
+
     func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult {
         try await client.rpc("claim_card_achievement", params: CardAchievementInput(pAchievementKey: key, pArtistKey: artistKey)).execute().value
     }
 
-    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID]) async throws -> UUID {
-        try await client.rpc("create_card_trade", params: CardTradeInput(pRecipientId: receiverID, pOfferedIds: offeredCardIDs, pRequestedIds: requestedCardIDs)).execute().value
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID {
+        try await client.rpc(
+            "create_card_trade",
+            params: CardTradeInput(
+                pRecipientId: receiverID,
+                pOfferedIds: offeredCardIDs,
+                pRequestedIds: requestedCardIDs,
+                pOfferedCoins: offeredCoins,
+                pRequestedCoins: requestedCoins
+            )
+        ).execute().value
     }
 
     func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult {

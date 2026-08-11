@@ -7,7 +7,9 @@ struct CardAlbumLibraryBrowser: View {
     let albums: [CardAlbumProgress]
     let cards: [CollectibleCardItem]
     let catalog: [CardAlbumCatalogItem]
+    let wishlistDefinitionIDs: Set<UUID>
     let onSelectCard: (CollectibleCardItem) -> Void
+    let onToggleWishlist: ((UUID) -> Void)?
 
     @State private var selectedArtist: CardBrowserArtistGroup?
 
@@ -15,12 +17,16 @@ struct CardAlbumLibraryBrowser: View {
         albums: [CardAlbumProgress],
         cards: [CollectibleCardItem],
         catalog: [CardAlbumCatalogItem],
-        onSelectCard: @escaping (CollectibleCardItem) -> Void
+        wishlistDefinitionIDs: Set<UUID> = [],
+        onSelectCard: @escaping (CollectibleCardItem) -> Void,
+        onToggleWishlist: ((UUID) -> Void)? = nil
     ) {
         self.albums = albums
         self.cards = cards
         self.catalog = catalog
+        self.wishlistDefinitionIDs = wishlistDefinitionIDs
         self.onSelectCard = onSelectCard
+        self.onToggleWishlist = onToggleWishlist
     }
 
     var body: some View {
@@ -64,7 +70,9 @@ struct CardAlbumLibraryBrowser: View {
                 artist: artist,
                 cards: cards,
                 catalog: catalog,
-                onSelectCard: onSelectCard
+                wishlistDefinitionIDs: wishlistDefinitionIDs,
+                onSelectCard: onSelectCard,
+                onToggleWishlist: onToggleWishlist
             )
         }
     }
@@ -193,7 +201,9 @@ private struct CardArtistAlbumsSheet: View {
     let artist: CardBrowserArtistGroup
     let cards: [CollectibleCardItem]
     let catalog: [CardAlbumCatalogItem]
+    let wishlistDefinitionIDs: Set<UUID>
     let onSelectCard: (CollectibleCardItem) -> Void
+    let onToggleWishlist: ((UUID) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -209,7 +219,9 @@ private struct CardArtistAlbumsSheet: View {
                                 album: album,
                                 cards: cardsForAlbum(album),
                                 catalog: catalogForAlbum(album),
-                                onSelectCard: onSelectCard
+                                wishlistDefinitionIDs: wishlistDefinitionIDs,
+                                onSelectCard: onSelectCard,
+                                onToggleWishlist: onToggleWishlist
                             )
                         } label: {
                             CardAlbumLibraryRow(album: album, cards: cardsForAlbum(album))
@@ -287,8 +299,19 @@ private struct CardArtistAlbumsSheet: View {
     }
 
     private func catalogForAlbum(_ album: CardAlbumProgress) -> [CardAlbumCatalogItem] {
-        catalog
-            .filter { $0.albumId == album.albumId }
+        let exact = catalog.filter { $0.albumId == album.albumId }
+        let candidates: [CardAlbumCatalogItem]
+        if !exact.isEmpty {
+            candidates = exact
+        } else {
+            let albumKey = CardBrowserNormalization.key(album.albumTitle)
+            let artistKey = CardBrowserNormalization.key(album.artistName)
+            candidates = catalog.filter {
+                CardBrowserNormalization.key($0.albumTitle) == albumKey
+                    && CardBrowserNormalization.key($0.artistName) == artistKey
+            }
+        }
+        return Array(Dictionary(grouping: candidates, by: \.definitionId).compactMap { $0.value.first })
             .sorted {
                 let leftDisc = $0.discNumber ?? 1
                 let rightDisc = $1.discNumber ?? 1
@@ -371,52 +394,52 @@ private struct CardAlbumCollectionDetail: View {
     let album: CardAlbumProgress
     let cards: [CollectibleCardItem]
     let catalog: [CardAlbumCatalogItem]
+    let wishlistDefinitionIDs: Set<UUID>
     let onSelectCard: (CollectibleCardItem) -> Void
+    let onToggleWishlist: ((UUID) -> Void)?
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 11) {
                 albumHeader
 
-                Text("SUAS CARTAS")
-                    .font(.caption2.bold())
-                    .tracking(1.6)
-                    .foregroundStyle(YePlyTheme.tertiary)
-                    .padding(.top, 8)
-
-                ForEach(ownedGroups) { group in
-                    Button { selectedCard = group.card } label: {
-                        CardAlbumOwnedTrackRow(group: group)
-                    }
-                    .buttonStyle(.plain)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("TRACKLIST COMPLETA")
+                        .font(.caption2.bold())
+                        .tracking(1.6)
+                        .foregroundStyle(YePlyTheme.tertiary)
+                    Spacer()
+                    Text("\(completeTrackRows.count) faixas")
+                        .font(.caption2.monospacedDigit().bold())
+                        .foregroundStyle(YePlyTheme.accent)
                 }
+                .padding(.top, 8)
 
-                if expectedMissingCount > 0 {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("AINDA FALTAM")
-                            .font(.caption2.bold())
-                            .tracking(1.6)
-                            .foregroundStyle(YePlyTheme.tertiary)
-                        Spacer()
-                        Text("\(expectedMissingCount) \(expectedMissingCount == 1 ? "carta" : "cartas")")
-                            .font(.caption2.monospacedDigit().bold())
-                            .foregroundStyle(YePlyTheme.accent)
-                    }
-                    .padding(.top, 9)
-
-                    if missingCards.isEmpty {
-                        Label(
-                            "Recarregue a coleção após sincronizar a discografia para identificar as faixas.",
-                            systemImage: "arrow.clockwise.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(YePlyTheme.secondary)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                    } else {
-                        ForEach(missingCards) { card in
-                            CardAlbumMissingTrackRow(card: card)
+                if completeTrackRows.isEmpty {
+                    Label(
+                        "O catálogo deste álbum ainda não retornou as faixas. Atualize a discografia e tente novamente.",
+                        systemImage: "arrow.clockwise.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(YePlyTheme.secondary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                } else {
+                    ForEach(completeTrackRows) { row in
+                        if let owned = row.owned {
+                            Button { selectedCard = owned.card } label: {
+                                CardAlbumOwnedTrackRow(group: owned, trackNumber: row.trackNumber)
+                            }
+                            .buttonStyle(.plain)
+                        } else if let catalog = row.catalog {
+                            CardAlbumMissingTrackRow(
+                                card: catalog,
+                                isWishlisted: wishlistDefinitionIDs.contains(catalog.definitionId),
+                                onToggleWishlist: onToggleWishlist.map { action in
+                                    { action(catalog.definitionId) }
+                                }
+                            )
                         }
                     }
                 }
@@ -479,13 +502,43 @@ private struct CardAlbumCollectionDetail: View {
             .sorted { $0.card.title.localizedStandardCompare($1.card.title) == .orderedAscending }
     }
 
-    private var missingCards: [CardAlbumCatalogItem] {
-        catalog.filter { !$0.isOwned }
+    private var completeTrackRows: [CardAlbumCompleteTrackRow] {
+        let groups = Dictionary(uniqueKeysWithValues: ownedGroups.map { ($0.card.definitionId, $0) })
+        var result = catalog.map { item in
+            CardAlbumCompleteTrackRow(
+                id: item.definitionId,
+                trackNumber: item.trackNumber,
+                discNumber: item.discNumber ?? 1,
+                catalog: item,
+                owned: groups[item.definitionId]
+            )
+        }
+        let catalogIDs = Set(catalog.map(\.definitionId))
+        result.append(contentsOf: ownedGroups.filter { !catalogIDs.contains($0.card.definitionId) }.map { group in
+            CardAlbumCompleteTrackRow(
+                id: group.card.definitionId,
+                trackNumber: Int.max,
+                discNumber: 1,
+                catalog: nil,
+                owned: group
+            )
+        })
+        return result.sorted {
+            if $0.discNumber != $1.discNumber { return $0.discNumber < $1.discNumber }
+            if $0.trackNumber != $1.trackNumber { return $0.trackNumber < $1.trackNumber }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
     }
+}
 
-    private var expectedMissingCount: Int {
-        max(album.totalCards - album.ownedUnique, 0)
-    }
+private struct CardAlbumCompleteTrackRow: Identifiable {
+    let id: UUID
+    let trackNumber: Int
+    let discNumber: Int
+    let catalog: CardAlbumCatalogItem?
+    let owned: CardBrowserOwnedGroup?
+
+    var title: String { catalog?.title ?? owned?.card.title ?? "" }
 }
 
 private struct CardBrowserOwnedGroup: Identifiable {
@@ -496,13 +549,21 @@ private struct CardBrowserOwnedGroup: Identifiable {
 
 private struct CardAlbumOwnedTrackRow: View {
     let group: CardBrowserOwnedGroup
+    var trackNumber: Int? = nil
 
     var body: some View {
         HStack(spacing: 12) {
+            if let trackNumber, trackNumber != Int.max {
+                Text(trackNumber.formatted())
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(YePlyTheme.tertiary)
+                    .frame(width: 22, alignment: .trailing)
+            }
             CardBrowserArtwork(
                 path: group.card.artworkPath,
                 seed: group.card.definitionId.uuidString,
                 title: group.card.title,
+                albumName: group.card.albumName,
                 tint: group.card.rarity.accentColor,
                 cornerRadius: 13
             )
@@ -541,6 +602,8 @@ private struct CardAlbumOwnedTrackRow: View {
 
 private struct CardAlbumMissingTrackRow: View {
     let card: CardAlbumCatalogItem
+    var isWishlisted = false
+    var onToggleWishlist: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -549,6 +612,7 @@ private struct CardAlbumMissingTrackRow: View {
                     path: card.artworkPath,
                     seed: card.definitionId.uuidString,
                     title: card.title,
+                    albumName: card.albumTitle,
                     tint: card.rarity.accentColor,
                     cornerRadius: 13
                 )
@@ -583,6 +647,18 @@ private struct CardAlbumMissingTrackRow: View {
                 Text("#\(card.trackNumber)")
                     .font(.caption.monospacedDigit().bold())
                     .foregroundStyle(YePlyTheme.secondary)
+            }
+
+            if let onToggleWishlist {
+                Button(action: onToggleWishlist) {
+                    Image(systemName: isWishlisted ? "heart.fill" : "heart")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(isWishlisted ? YePlyTheme.accent : YePlyTheme.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(YePlyTheme.elevatedStrong, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isWishlisted ? "Remover da lista de desejos" : "Adicionar à lista de desejos")
             }
         }
         .padding(10)

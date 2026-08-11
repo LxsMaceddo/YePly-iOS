@@ -53,10 +53,20 @@ protocol MusicRepository: Sendable {
     func fetchCardAlbumProgress() async throws -> [CardAlbumProgress]
     func fetchCardAlbumCatalog() async throws -> [CardAlbumCatalogItem]
     func fetchEquippedCardBadges(profileID: UUID) async throws -> [EquippedAlbumBadge]
+    /// RPC contract: `profile_owned_badges(p_profile_id)` returns badge_id,
+    /// badge_kind, title, subtitle, artwork_path, emoji, slot and source_id.
+    func fetchOwnedProfileBadges(profileID: UUID) async throws -> [ProfileCollectibleBadge]
+    /// RPC contract: `profile_featured_card(p_profile_id)` returns zero or one
+    /// row using the same columns as `CollectibleCardItem`.
+    func fetchFeaturedProfileCard(profileID: UUID) async throws -> CollectibleCardItem?
     func fetchCardAchievements() async throws -> [CardAchievement]
     func fetchCardArtists() async throws -> [CardArtistOption]
     func fetchCardTrades() async throws -> [CardTradeSummary]
     func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem]
+    func fetchCardWishlist() async throws -> [CardWishlistItem]
+    func toggleCardWishlist(definitionID: UUID) async throws -> CardRewardResult
+    func fetchCardPackStore() async throws -> [CardPackStoreProduct]
+    func buyCardPack(product: CardPackProductKind) async throws -> CardRewardResult
     func claimDailyCardReward() async throws -> CardRewardResult
     func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID
     func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult
@@ -65,8 +75,11 @@ protocol MusicRepository: Sendable {
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult
     func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult
     func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult
+    /// RPC contract: `set_profile_featured_card(p_instance_id)` accepts nil to
+    /// clear the featured song and rejects cards not owned by the caller.
+    func setFeaturedProfileCard(instanceID: UUID?) async throws -> CardRewardResult
     func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult
-    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID]) async throws -> UUID
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID
     func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult
@@ -306,6 +319,8 @@ actor DemoMusicRepository: MusicRepository {
         guard profileID == demoUserID else { return [] }
         return []
     }
+    func fetchOwnedProfileBadges(profileID: UUID) async throws -> [ProfileCollectibleBadge] { [] }
+    func fetchFeaturedProfileCard(profileID: UUID) async throws -> CollectibleCardItem? { nil }
     func fetchCardAchievements() async throws -> [CardAchievement] {
         [
             CardAchievement(achievementKey: "night_listener", title: "Night Listener", description: "Ouça 100 músicas entre 00:00 e 05:00.", icon: "moon.stars.fill", progress: 18, target: 100, unlockedAt: nil, rewardClaimedAt: nil),
@@ -315,6 +330,10 @@ actor DemoMusicRepository: MusicRepository {
     func fetchCardArtists() async throws -> [CardArtistOption] { [CardArtistOption(artistKey: "kanye west", artistName: "Kanye West", cardCount: 3)] }
     func fetchCardTrades() async throws -> [CardTradeSummary] { [] }
     func fetchTradeableCards(username: String) async throws -> [CollectibleCardItem] { demoCards }
+    func fetchCardWishlist() async throws -> [CardWishlistItem] { [] }
+    func toggleCardWishlist(definitionID: UUID) async throws -> CardRewardResult { demoReward("Lista de desejos atualizada.") }
+    func fetchCardPackStore() async throws -> [CardPackStoreProduct] { CardPackProductKind.allCases.map { CardPackStoreProduct(kind: $0) } }
+    func buyCardPack(product: CardPackProductKind) async throws -> CardRewardResult { demoReward("Pack comprado.") }
     func claimDailyCardReward() async throws -> CardRewardResult { demoReward("Pack diário recebido.") }
     func createCardPackCode(_ code: String, label: String?, maxRedemptions: Int, artistKey: String?, cardCount: Int, rarityFloor: CollectibleCardRarity) async throws -> UUID { UUID() }
     func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult { demoReward("\(packCount) pack(s) enviado(s) para @\(username).") }
@@ -323,8 +342,9 @@ actor DemoMusicRepository: MusicRepository {
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult { demoReward(nil) }
     func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult { demoReward("Artistas favoritos atualizados.") }
     func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult { demoReward("Badge equipada.") }
+    func setFeaturedProfileCard(instanceID: UUID?) async throws -> CardRewardResult { demoReward(instanceID == nil ? "Destaque removido." : "Carta colocada em destaque.") }
     func claimCardAchievement(key: String, artistKey: String) async throws -> CardRewardResult { demoReward("Pack de conquista recebido.") }
-    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID]) async throws -> UUID { UUID() }
+    func createCardTrade(receiverID: UUID, offeredCardIDs: [UUID], requestedCardIDs: [UUID], offeredCoins: Int, requestedCoins: Int) async throws -> UUID { UUID() }
     func respondToCardTrade(id: UUID, accept: Bool) async throws -> CardRewardResult { demoReward(accept ? "Troca concluída." : "Troca recusada.") }
     func recordNowPlayingShare(trackID: UUID) async throws -> CardRewardResult { demoReward("Conquista Show Off atualizada.") }
     func syncCollectibleCatalog(artistName: String) async throws -> CardRewardResult { demoReward("Catálogo sincronizado.") }

@@ -5,15 +5,20 @@ adds verified collaborative releases, maps known recordings to MusicBrainz, enri
 rarity with ListenBrainz, Apple Music (optional), and YePly playback, then imports the
 snapshot through an admin-only RPC.
 
-Deploy after applying migrations through `202608100012_spotify_card_catalog.sql`:
+Deploy after applying migrations through `202608110017_card_economy_universal_badges.sql`:
 
 ```bash
 supabase functions deploy sync-card-catalog
 ```
 
-Supabase supplies `SUPABASE_URL` and `SUPABASE_ANON_KEY`; the function forwards the
-signed-in admin JWT to the security-definer import RPC. Never add a Supabase service-role
-key to the app or function secrets.
+Supabase supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY` and
+`SUPABASE_SERVICE_ROLE_KEY`. The function forwards the signed-in admin JWT to the
+security-definer import RPC. The service role is used only inside the Edge Function to
+mirror album artwork into `covers/catalog/spotify/`; never add it to the iOS app or
+create a second copy of it in project secrets.
+
+The canonical Kanye catalogue keeps only Donda (Deluxe), with 32 tracks. Standard
+Donda is intentionally filtered so album progress is not split across editions.
 
 Spotify catalogue access is required. Create a Spotify developer app, then store its
 client credentials only in Supabase Edge Function secrets:

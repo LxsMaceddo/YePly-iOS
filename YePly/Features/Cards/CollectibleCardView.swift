@@ -268,8 +268,12 @@ public struct CollectibleCardView: View {
         ZStack {
             CardArtworkPlaceholder(seed: model.id, rarity: model.rarity, title: model.title)
 
-            if let artworkURL = model.artworkURL {
-                YePlyRemoteImage(url: artworkURL, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
+            let artworkCandidates = YePlyArtworkFallbacks.candidates(
+                primary: model.artworkURL,
+                albumName: model.albumName
+            )
+            if !artworkCandidates.isEmpty {
+                YePlyRemoteImage(urls: artworkCandidates, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
                     if case let .success(image) = phase {
                         image
                             .resizable()

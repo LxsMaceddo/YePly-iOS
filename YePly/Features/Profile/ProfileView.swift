@@ -2,6 +2,11 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+private struct ProfileScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 struct ProfileView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var container: AppContainer
@@ -13,21 +18,42 @@ struct ProfileView: View {
     @State private var backgroundURL: URL?
     @State private var socialProfile: UserProfile?
     @State private var equippedBadges: [EquippedAlbumBadge] = []
+    @State private var ownedBadgeCount = 0
+    @State private var featuredCard: CollectibleCardItem?
+    @State private var profileScrollOffset: CGFloat = 0
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
+            ProfileHeroBackdrop(url: backgroundURL)
+                .frame(maxWidth: .infinity)
+                .frame(height: 565)
+                .offset(y: -1)
+                .ignoresSafeArea(edges: .top)
+                .opacity(Double(max(0, min(1, 1 + profileScrollOffset / 360))))
             ScrollView {
                 VStack(spacing: 20) {
                     profileHero
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ProfileScrollOffsetKey.self,
+                                    value: proxy.frame(in: .named("profileScroll")).minY
+                                )
+                            }
+                        }
 
                     if !equippedBadges.isEmpty {
                         ProfileBadgeShowcase(badges: equippedBadges)
                     }
 
+                    if let featuredCard {
+                        ProfileFeaturedCardPanel(card: featuredCard)
+                    }
+
                     if let tastes = session.profile?.tastes, !tastes.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Label("Sua assinatura musical", systemImage: "heart.fill")
+                            Label("Seus estilos musicais", systemImage: "heart.fill")
                                 .font(.headline)
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 8)], alignment: .leading, spacing: 8) {
                                 ForEach(tastes, id: \.self) { taste in
@@ -94,12 +120,9 @@ struct ProfileView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 40)
-                .background(alignment: .top) {
-                    ProfileHeroBackdrop(url: backgroundURL)
-                        .frame(height: 540)
-                        .offset(y: -24)
-                }
             }
+            .coordinateSpace(name: "profileScroll")
+            .onPreferenceChange(ProfileScrollOffsetKey.self) { profileScrollOffset = $0 }
         }
         .navigationBarHidden(true)
         .sheet(isPresented: $showingEditor) {
@@ -108,12 +131,9 @@ struct ProfileView: View {
         .task(id: session.profile?.avatarPath) { avatarURL = await session.avatarURL() }
         .task(id: session.profile?.backgroundPath) { backgroundURL = await session.backgroundURL() }
         .task(id: session.profile?.id) {
-            guard offlineLibrary.isConnected, let id = session.profile?.id else { return }
-            async let profile = container.repository.fetchProfile(id: id)
-            async let badges = container.repository.fetchEquippedCardBadges(profileID: id)
-            socialProfile = try? await profile
-            equippedBadges = (try? await badges) ?? []
+            await refreshSocialProfile()
         }
+        .onAppear { Task { await refreshSocialProfile() } }
         .confirmationDialog("Sair do YePly?", isPresented: $showingSignOut, titleVisibility: .visible) {
             Button("Sair", role: .destructive) { Task { await session.signOut() } }
             Button("Cancelar", role: .cancel) {}
@@ -127,7 +147,7 @@ struct ProfileView: View {
                 Text("PERFIL").font(.caption2.bold()).tracking(2).foregroundStyle(.white.opacity(0.75))
                 Spacer()
                 profileToolbarButton(systemImage: "bell.fill", action: notifications.openCenter, badge: notifications.unreadCount)
-                NavigationLink { CardProfileShowcaseView() } label: {
+                NavigationLink { ProfileCollectiblesView() } label: {
                     Image(systemName: "medal.star.fill")
                         .frame(width: 42, height: 42)
                         .background(.black.opacity(0.34), in: Circle())
@@ -180,7 +200,7 @@ struct ProfileView: View {
                 Divider().frame(height: 34).overlay(.white.opacity(0.16))
                 profileHeroMetric(value: socialProfile?.followingCount ?? 0, label: "seguindo")
                 Divider().frame(height: 34).overlay(.white.opacity(0.16))
-                profileHeroMetric(value: equippedBadges.count, label: "badges")
+                profileHeroMetric(value: max(ownedBadgeCount, socialProfile?.ownedBadgeCount ?? 0), label: "badges")
             }
             .padding(.vertical, 13)
             .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -218,6 +238,19 @@ struct ProfileView: View {
 
     private var formattedOfflineSize: String {
         ByteCountFormatter.string(fromByteCount: offlineLibrary.downloadedSizeBytes, countStyle: .file)
+    }
+
+    private func refreshSocialProfile() async {
+        guard offlineLibrary.isConnected, let id = session.profile?.id else { return }
+        async let profileRequest = container.repository.fetchProfile(id: id)
+        async let equippedRequest = container.repository.fetchEquippedCardBadges(profileID: id)
+        async let ownedRequest = container.repository.fetchOwnedProfileBadges(profileID: id)
+        async let featuredRequest = container.repository.fetchFeaturedProfileCard(profileID: id)
+        socialProfile = try? await profileRequest
+        equippedBadges = (try? await equippedRequest) ?? equippedBadges
+        let loadedBadges = (try? await ownedRequest) ?? []
+        ownedBadgeCount = socialProfile?.ownedBadgeCount ?? loadedBadges.count
+        featuredCard = try? await featuredRequest
     }
 }
 
@@ -307,35 +340,24 @@ struct ProfileBadgeShowcase: View {
                 .tracking(1.7)
                 .foregroundStyle(YePlyTheme.tertiary)
 
-            HStack(spacing: 18) {
-                ForEach(badges.sorted { $0.slot < $1.slot }) { badge in
+            HStack(spacing: 8) {
+                ForEach(badges.sorted { $0.slot < $1.slot }.prefix(4)) { badge in
                     VStack(spacing: 7) {
-                        CardBrowserArtwork(
-                            path: badge.artworkPath,
-                            seed: badge.albumId.uuidString,
+                        ProfileBadgeArtwork(
+                            kind: ProfileBadgeKind(rawValue: badge.badgeKind ?? "album") ?? .album,
+                            artworkPath: badge.artworkPath,
+                            emoji: badge.emoji,
+                            seed: badge.albumId?.uuidString ?? badge.badgeId.uuidString,
                             title: badge.title,
-                            tint: YePlyTheme.accent,
-                            cornerRadius: 40
+                            size: 60
                         )
-                        .frame(width: 72, height: 72)
-                        .clipShape(Circle())
-                        .overlay {
-                            Circle().stroke(
-                                LinearGradient(
-                                    colors: [YePlyTheme.accent, .white.opacity(0.65)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2
-                            )
-                        }
                         .shadow(color: YePlyTheme.accent.opacity(0.22), radius: 10, y: 5)
 
                         Text(badge.title)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(YePlyTheme.secondary)
                             .lineLimit(1)
-                            .frame(width: 82)
+                            .frame(width: 64)
                     }
                 }
                 Spacer(minLength: 0)
@@ -347,13 +369,21 @@ struct ProfileBadgeShowcase: View {
     }
 }
 
+private struct ProfileCountryPreset: Identifiable, Sendable {
+    let code: String
+    let flag: String
+    let name: String
+    var id: String { code }
+}
+
 private struct ProfileEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var offlineLibrary: OfflineLibraryStore
     @State private var displayName: String
     @State private var bio: String
-    @State private var tastesText: String
+    @State private var selectedGenres: Set<String>
+    @State private var selectedCountryCode: String
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedBackgroundPhoto: PhotosPickerItem?
     @State private var avatarPreview: UIImage?
@@ -368,7 +398,8 @@ private struct ProfileEditorView: View {
         self.profile = profile
         _displayName = State(initialValue: profile.displayName)
         _bio = State(initialValue: profile.bio ?? "")
-        _tastesText = State(initialValue: (profile.tastes ?? []).joined(separator: ", "))
+        _selectedGenres = State(initialValue: Set(profile.tastes ?? []))
+        _selectedCountryCode = State(initialValue: profile.residenceCountryCode ?? Locale.current.region?.identifier ?? "BR")
     }
 
     var body: some View {
@@ -430,9 +461,45 @@ private struct ProfileEditorView: View {
                     HStack { Spacer(); Text("\(bio.count)/280").font(.caption2).foregroundStyle(bio.count > 280 ? Color.red : YePlyTheme.secondary) }
                 }
 
-                Section("Gostos musicais") {
-                    TextField("Rap, R&B, Funk, Rock…", text: $tastesText, axis: .vertical)
-                    Text("Separe os gostos com vírgulas. Você pode adicionar até 12.").font(.caption).foregroundStyle(.secondary)
+                Section {
+                    Picker("País onde você reside", selection: $selectedCountryCode) {
+                        ForEach(Self.countryPresets) { country in
+                            Text("\(country.flag) \(country.name)").tag(country.code)
+                        }
+                    }
+                } header: {
+                    Text("Residência")
+                } footer: {
+                    Text("Usamos somente o país para calcular as conquistas Fan Nacional e MUITO Fan Nacional.")
+                }
+
+                Section {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 9)], alignment: .leading, spacing: 9) {
+                        ForEach(Self.genrePresets, id: \.self) { genre in
+                            Button {
+                                if selectedGenres.contains(genre) {
+                                    selectedGenres.remove(genre)
+                                } else if selectedGenres.count < 8 {
+                                    selectedGenres.insert(genre)
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if selectedGenres.contains(genre) { Image(systemName: "checkmark") }
+                                    Text(genre).lineLimit(1)
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(selectedGenres.contains(genre) ? .black : .white)
+                                .padding(.horizontal, 11)
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                                .background(selectedGenres.contains(genre) ? Color.white : YePlyTheme.elevatedStrong, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    Text("Estilos musicais")
+                } footer: {
+                    Text("Escolha até 8 estilos. Os presets mantêm sua assinatura organizada e fácil de descobrir.")
                 }
 
                 if offlineLibrary.isOfflineMode && !session.isDemo {
@@ -476,6 +543,22 @@ private struct ProfileEditorView: View {
         }
     }
 
+    private static let genrePresets = [
+        "Rap", "Trap", "R&B", "MPB", "Pop", "Funk", "Metal", "NuMetal",
+        "Rock", "Indie", "Eletrônica", "Jazz", "Reggae", "Samba"
+    ]
+
+    private static let countryPresets: [ProfileCountryPreset] = [
+        .init(code: "BR", flag: "🇧🇷", name: "Brasil"), .init(code: "US", flag: "🇺🇸", name: "Estados Unidos"),
+        .init(code: "PT", flag: "🇵🇹", name: "Portugal"), .init(code: "GB", flag: "🇬🇧", name: "Reino Unido"),
+        .init(code: "CA", flag: "🇨🇦", name: "Canadá"), .init(code: "MX", flag: "🇲🇽", name: "México"),
+        .init(code: "AR", flag: "🇦🇷", name: "Argentina"), .init(code: "CO", flag: "🇨🇴", name: "Colômbia"),
+        .init(code: "ES", flag: "🇪🇸", name: "Espanha"), .init(code: "FR", flag: "🇫🇷", name: "França"),
+        .init(code: "DE", flag: "🇩🇪", name: "Alemanha"), .init(code: "IT", flag: "🇮🇹", name: "Itália"),
+        .init(code: "JP", flag: "🇯🇵", name: "Japão"), .init(code: "KR", flag: "🇰🇷", name: "Coreia do Sul"),
+        .init(code: "NG", flag: "🇳🇬", name: "Nigéria"), .init(code: "ZA", flag: "🇿🇦", name: "África do Sul")
+    ]
+
     private var initials: String {
         displayName.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased()
     }
@@ -491,7 +574,7 @@ private struct ProfileEditorView: View {
 
     private func save() {
         isSaving = true
-        let tastes = tastesText.split(separator: ",").map(String.init)
+        let tastes = Self.genrePresets.filter(selectedGenres.contains)
         let jpeg = avatarPreview.flatMap(makeAvatarJPEG)
         let backgroundJPEG = backgroundPreview.flatMap(makeBackgroundJPEG)
         Task {
@@ -499,6 +582,7 @@ private struct ProfileEditorView: View {
                 displayName: displayName,
                 bio: bio,
                 tastes: tastes,
+                residenceCountryCode: selectedCountryCode,
                 avatarJPEG: jpeg,
                 backgroundJPEG: backgroundJPEG
             ) { dismiss() }
