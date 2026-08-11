@@ -376,7 +376,7 @@ struct CardAchievement: Codable, Identifiable, Hashable, Sendable {
     var completion: Double { target > 0 ? min(Double(progress) / Double(target), 1) : 0 }
     var displayEmoji: String {
         if let emoji, !emoji.isEmpty { return emoji }
-        switch achievementKey {
+        return switch achievementKey {
         case "night_listener": "🌙"
         case "again": "🔁"
         case "day_one": "🗿"
@@ -416,7 +416,7 @@ struct CardAchievement: Codable, Identifiable, Hashable, Sendable {
             default: return category
             }
         }
-        switch achievementKey {
+        return switch achievementKey {
         case "first_album", "discography_beginning", "no_skipping", "i_was_there_first", "collector", "national_fan", "national_superfan", "top_10": "Coleção"
         case "trader", "networker", "familiar_faces", "upgrade": "Trocas"
         case "community_dj", "show_off": "Comunidade"

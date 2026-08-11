@@ -723,7 +723,7 @@ private struct CardStoreProductTile: View {
         if let accentHex = product.accentHex, let color = Color(yeplyHex: accentHex) {
             return [color, color.opacity(0.48), .black]
         }
-        switch product.productKey {
+        return switch product.productKey {
         case .common: [Color.blue.opacity(0.64), Color.black]
         case .epic: [Color.purple.opacity(0.8), Color.black]
         case .favoriteArtists: [Color.pink.opacity(0.8), Color.purple.opacity(0.45)]
