@@ -266,22 +266,18 @@ public struct CollectibleCardView: View {
     @ViewBuilder
     private func artwork(cornerRadius: CGFloat) -> some View {
         ZStack {
-            CardArtworkPlaceholder(seed: model.id, rarity: model.rarity, title: model.title)
-
-            let artworkCandidates = YePlyArtworkFallbacks.candidates(
-                primary: model.artworkURL,
-                albumName: model.albumName
+            // The list browser already has the reliable renderer for direct
+            // URLs, Supabase paths and album fallbacks. Reuse that exact path
+            // here so inspecting/opening a card cannot silently fall back to a
+            // different image pipeline than the collection list.
+            CardBrowserArtwork(
+                path: model.artworkURL?.absoluteString,
+                seed: model.id,
+                title: model.title,
+                albumName: model.albumName,
+                tint: model.rarity.primaryColor,
+                cornerRadius: cornerRadius
             )
-            if !artworkCandidates.isEmpty {
-                YePlyRemoteImage(urls: artworkCandidates, transaction: Transaction(animation: .easeOut(duration: 0.12))) { phase in
-                    if case let .success(image) = phase {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .transition(.opacity)
-                    }
-                }
-            }
 
             LinearGradient(
                 colors: [.clear, .black.opacity(0.08), .black.opacity(0.42)],
