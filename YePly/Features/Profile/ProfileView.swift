@@ -394,11 +394,13 @@ private struct ProfileHeroBackdrop: View {
 
 struct ProfileMediaImage: View {
     let url: URL
-    @State private var image: UIImage?
+    @State private var media: ProfileDecodedMedia?
 
     var body: some View {
         Group {
-            if let image {
+            if let media, media.frames.count > 1 {
+                ProfileAnimatedImageView(frames: media.frames, duration: media.duration)
+            } else if let image = media?.frames.first {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -406,35 +408,106 @@ struct ProfileMediaImage: View {
             else { Color.clear.overlay(ProgressView().tint(.white.opacity(0.7))) }
         }
         .task(id: url) {
-            let sourceURL: URL
-            if url.isFileURL {
-                sourceURL = url
-            } else {
-                do {
-                    sourceURL = try await URLSession.shared.download(from: url).0
-                } catch {
-                    return
+            media = nil
+            let data: Data
+            do {
+                if url.isFileURL {
+                    data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                } else {
+                    let (downloaded, response) = try await URLSession.shared.data(from: url)
+                    if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return }
+                    data = downloaded
                 }
-            }
-            image = Self.decodeFirstFrame(at: sourceURL)
+            } catch { return }
+
+            media = await Task.detached(priority: .userInitiated) {
+                Self.decodeMedia(data)
+            }.value
         }
     }
 
-    private static func decodeFirstFrame(at url: URL) -> UIImage? {
-        guard let source = CGImageSourceCreateWithURL(
-            url as CFURL,
+    private static func decodeMedia(_ data: Data) -> ProfileDecodedMedia? {
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData,
             [kCGImageSourceShouldCache: false] as CFDictionary
         ) else { return nil }
 
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 0 else { return nil }
         let thumbnailOptions: CFDictionary = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 1_440,
+            kCGImageSourceThumbnailMaxPixelSize: 720,
             kCGImageSourceShouldCacheImmediately: true
         ] as CFDictionary
 
-        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else { return nil }
-        return UIImage(cgImage: thumbnail)
+        if frameCount == 1 {
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else { return nil }
+            return ProfileDecodedMedia(frames: [UIImage(cgImage: thumbnail)], duration: 0)
+        }
+
+        // Keep animated backgrounds smooth without allowing a large GIF to exhaust
+        // the iPhone's memory. Long animations are sampled across their full length.
+        let maximumDecodedFrames = 72
+        let selectedCount = min(frameCount, maximumDecodedFrames)
+        let selectedIndices = (0..<selectedCount).map { position in
+            min(frameCount - 1, Int((Double(position) * Double(frameCount)) / Double(selectedCount)))
+        }
+        var frames: [UIImage] = []
+        frames.reserveCapacity(selectedCount)
+        for index in selectedIndices {
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, index, thumbnailOptions) else { continue }
+            frames.append(UIImage(cgImage: thumbnail))
+        }
+        guard !frames.isEmpty else { return nil }
+
+        let duration = (0..<frameCount).reduce(0.0) { partial, index in
+            partial + gifFrameDuration(source: source, index: index)
+        }
+        return ProfileDecodedMedia(frames: frames, duration: max(duration, Double(frames.count) / 15.0))
+    }
+
+    private static func gifFrameDuration(source: CGImageSource, index: Int) -> TimeInterval {
+        guard
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+            let gif = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+        else { return 0.1 }
+        let unclamped = gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double
+        let clamped = gif[kCGImagePropertyGIFDelayTime] as? Double
+        return max(unclamped ?? clamped ?? 0.1, 0.02)
+    }
+}
+
+private struct ProfileDecodedMedia: @unchecked Sendable {
+    let frames: [UIImage]
+    let duration: TimeInterval
+}
+
+private struct ProfileAnimatedImageView: UIViewRepresentable {
+    let frames: [UIImage]
+    let duration: TimeInterval
+
+    func makeUIView(context: Context) -> UIImageView {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
+        return imageView
+    }
+
+    func updateUIView(_ imageView: UIImageView, context: Context) {
+        imageView.stopAnimating()
+        imageView.animationImages = frames
+        imageView.animationDuration = duration
+        imageView.animationRepeatCount = 0
+        imageView.image = frames.first
+        imageView.startAnimating()
+    }
+
+    static func dismantleUIView(_ imageView: UIImageView, coordinator: Void) {
+        imageView.stopAnimating()
+        imageView.animationImages = nil
+        imageView.image = nil
     }
 }
 
@@ -588,7 +661,7 @@ private struct ProfileEditorView: View {
                     .frame(height: 132)
                     .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
 
-                    PhotosPicker(selection: $selectedBackgroundPhoto, matching: .images) {
+                    PhotosPicker(selection: $selectedBackgroundPhoto, matching: .images, preferredItemEncoding: .current) {
                         Label("Escolher imagem de fundo", systemImage: "photo.fill.on.rectangle.fill")
                     }
                 } header: {
