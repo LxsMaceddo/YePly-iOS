@@ -157,25 +157,31 @@ private final class CardsHubViewModel: ObservableObject {
     func openAll(repository: any MusicRepository) async {
         guard !isOpeningPack, !packs.isEmpty else { return }
         isOpeningPack = true
-        let packsToOpen = packs
-        var results: [YePlyOpenedPack] = []
+        // The database opens packs oldest-first. Mirror that order so the flat
+        // response can be split back into the correct visual packs.
+        let packsToOpen = packs.sorted {
+            if $0.createdAt == $1.createdAt { return $0.id.uuidString < $1.id.uuidString }
+            return $0.createdAt < $1.createdAt
+        }
         defer { isOpeningPack = false }
 
         do {
+            let allCards = try await repository.openAllCardPacks()
+            var cursor = allCards.startIndex
+            var results: [YePlyOpenedPack] = []
+            results.reserveCapacity(packsToOpen.count)
+
             for pack in packsToOpen {
-                let cards = try await repository.openCardPack(id: pack.id)
-                results.append(YePlyOpenedPack(pack: pack, cards: cards))
+                let remaining = allCards.distance(from: cursor, to: allCards.endIndex)
+                let count = min(pack.cardCount, remaining)
+                let end = allCards.index(cursor, offsetBy: count)
+                results.append(YePlyOpenedPack(pack: pack, cards: Array(allCards[cursor..<end])))
+                cursor = end
             }
             openedPacks = results
             await load(repository: repository)
         } catch {
-            if !results.isEmpty {
-                openedPacks = results
-                rewardMessage = "Alguns packs foram abertos; os demais continuam guardados."
-                await load(repository: repository)
-            } else {
-                errorMessage = error.localizedDescription
-            }
+            errorMessage = error.localizedDescription
         }
     }
 

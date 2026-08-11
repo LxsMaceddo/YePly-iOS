@@ -326,6 +326,8 @@ struct YePlyBulkPackOpeningView: View {
     @State private var showCards = false
 
     private var allCards: [CollectibleCardItem] { openedPacks.flatMap(\.cards) }
+    private var previewCards: [CollectibleCardItem] { Array(allCards.prefix(60)) }
+    private var hiddenCardCount: Int { max(0, allCards.count - previewCards.count) }
 
     var body: some View {
         ZStack {
@@ -347,7 +349,7 @@ struct YePlyBulkPackOpeningView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .task(id: allCards.map(\.id)) {
+        .task(id: openedPacks.count) {
             await preloadArtwork()
         }
     }
@@ -421,12 +423,20 @@ struct YePlyBulkPackOpeningView: View {
                     columns: [GridItem(.flexible()), GridItem(.flexible())],
                     spacing: 12
                 ) {
-                    ForEach(allCards) { card in
+                    ForEach(previewCards) { card in
                         ResolvedPackCard(card: card, style: .compact, artworkResolver: artworkResolver)
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 110)
+                if hiddenCardCount > 0 {
+                    Text("Mais \(hiddenCardCount) cartas já foram guardadas na sua coleção")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(YePlyTheme.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                        .padding(.top, 8)
+                }
+                Color.clear.frame(height: 110)
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -460,7 +470,9 @@ struct YePlyBulkPackOpeningView: View {
     }
 
     private func preloadArtwork() async {
-        for card in allCards {
+        // Preloading thousands of covers serialized the whole screen. The
+        // collection cache resolves the remainder only when it becomes visible.
+        for card in previewCards.prefix(24) {
             guard !Task.isCancelled else { return }
             guard let url = await artworkResolver(card) else { continue }
             _ = await YePlyRemoteImageLoader.shared.data(for: url)

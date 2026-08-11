@@ -529,6 +529,12 @@ actor SupabaseMusicRepository: MusicRepository {
         return opened
     }
 
+    func openAllCardPacks() async throws -> [CollectibleCardItem] {
+        // One server round-trip replaces one request (and one inventory reload)
+        // per pack. Edition totals are refreshed once by CardsHubView afterwards.
+        try await client.rpc("open_all_card_packs").execute().value
+    }
+
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult {
         try await client.rpc("record_card_listening", params: CardListeningInput(pTrackId: trackID, pListenedSeconds: listenedSeconds)).execute().value
     }

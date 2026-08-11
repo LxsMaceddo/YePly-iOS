@@ -72,6 +72,7 @@ protocol MusicRepository: Sendable {
     func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult
     func redeemPackCode(_ code: String) async throws -> CardRewardResult
     func openCardPack(id: UUID) async throws -> [CollectibleCardItem]
+    func openAllCardPacks() async throws -> [CollectibleCardItem]
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult
     func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult
     func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult
@@ -352,6 +353,7 @@ actor DemoMusicRepository: MusicRepository {
     func adminGrantCardPacks(username: String, packCount: Int, cardCount: Int, artistKey: String?, rarityFloor: CollectibleCardRarity, reason: String?) async throws -> CardRewardResult { demoReward("\(packCount) pack(s) enviado(s) para @\(username).") }
     func redeemPackCode(_ code: String) async throws -> CardRewardResult { demoReward("Código resgatado.") }
     func openCardPack(id: UUID) async throws -> [CollectibleCardItem] { demoCards }
+    func openAllCardPacks() async throws -> [CollectibleCardItem] { demoCards }
     func recordCardListening(trackID: UUID, listenedSeconds: Int) async throws -> CardRewardResult { demoReward(nil) }
     func setFavoriteCardArtists(_ artistKeys: [String]) async throws -> CardRewardResult { demoReward("Artistas favoritos atualizados.") }
     func equipCardBadge(id: UUID, slot: Int) async throws -> CardRewardResult { demoReward("Badge equipada.") }
