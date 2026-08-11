@@ -8,7 +8,7 @@ const corsHeaders = {
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
 const LISTENBRAINZ_BASE = "https://api.listenbrainz.org/1";
-const USER_AGENT = "YePly/2.4 (https://yeply.app)";
+const USER_AGENT = "YePly/2.5 (https://yeply.app)";
 
 // Spotify may expose the date of a later re-upload. For the curated catalogue,
 // YePly keeps the project's original release date so discographies stay historical.
@@ -629,6 +629,7 @@ Deno.serve(async (request) => {
     return jsonResponse({
       ...result,
       success: true,
+      rarity_model: "manual-album-v1",
       spotify_profiles: artist.spotifyIDs.length,
       spotify_discovered_albums: dynamicAlbums.length,
       musicbrainz_matches: musicBrainzMatches,
@@ -636,7 +637,7 @@ Deno.serve(async (request) => {
       listenbrainz_matches: listenBrainzMatches,
       apple_music_enabled: appleMusicAvailable,
       apple_music_matches: appleMusicMatches,
-      message: `${baseMessage} Raridades recalculadas dentro da discografia do artista.`,
+      message: `${baseMessage} As raridades manuais por álbum foram preservadas.`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";

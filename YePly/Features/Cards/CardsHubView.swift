@@ -536,14 +536,14 @@ struct CardDetailSheet: View {
 
                     if card.catalogSource != nil {
                         VStack(alignment: .leading, spacing: 14) {
-                            Label("Pulso da música", systemImage: "chart.bar.xaxis.ascending")
+                            Label("Métrica manual do álbum", systemImage: "chart.bar.xaxis.ascending")
                                 .font(.headline)
                             HStack {
-                                metric("Reproduções", value: card.globalListenCount)
+                                metric("Visualizações", value: card.globalListenCount)
                                 Divider().frame(height: 34)
-                                metric("Ouvintes", value: card.globalListenerCount)
+                                metricText("Percentil", value: card.popularityScore.map { "\(Int($0.rounded()))%" } ?? "—")
                                 Divider().frame(height: 34)
-                                metric("No artista", value: card.artistPopularityRank, suffix: card.artistCatalogSize.map { "/\($0)" })
+                                metric("No álbum", value: card.artistPopularityRank, suffix: card.artistCatalogSize.map { "/\($0)" })
                             }
                             NavigationLink {
                                 CardYePlyTrackSearchView(card: card)
@@ -576,6 +576,14 @@ struct CardDetailSheet: View {
     private func metric(_ title: String, value: Int?, suffix: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value.map { $0.formatted(.number.notation(.compactName)) + (suffix ?? "") } ?? "—").font(.subheadline.bold())
+            Text(title).font(.caption2).foregroundStyle(YePlyTheme.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func metricText(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.subheadline.bold())
             Text(title).font(.caption2).foregroundStyle(YePlyTheme.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

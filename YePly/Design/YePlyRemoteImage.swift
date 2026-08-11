@@ -29,6 +29,7 @@ actor YePlyRemoteImageLoader {
         )
         configuration.timeoutIntervalForRequest = 18
         configuration.timeoutIntervalForResource = 35
+        configuration.waitsForConnectivity = true
         session = URLSession(configuration: configuration)
     }
 
@@ -43,16 +44,28 @@ actor YePlyRemoteImageLoader {
 
         let session = session
         let task = Task<Data?, Never> {
-            var request = URLRequest(url: url)
-            request.cachePolicy = .returnCacheDataElseLoad
-            request.setValue("image/avif,image/webp,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
-            guard let (data, response) = try? await session.data(for: request),
-                  let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode),
-                  !data.isEmpty,
-                  data.count <= 20 * 1_024 * 1_024
-            else { return nil }
-            return data
+            func fetch(policy: URLRequest.CachePolicy) async -> Data? {
+                var request = URLRequest(url: url)
+                request.cachePolicy = policy
+                // Do not advertise AVIF/WebP here: some CDNs honor that header,
+                // but not every iOS/UIKit decoder accepts the returned variant.
+                request.setValue("image/jpeg,image/png,image/*;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
+                guard let (data, response) = try? await session.data(for: request),
+                      let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode),
+                      !data.isEmpty,
+                      data.count <= 20 * 1_024 * 1_024,
+                      UIImage(data: data) != nil
+                else { return nil }
+                return data
+            }
+
+            if let cachedOrRemote = await fetch(policy: .returnCacheDataElseLoad) {
+                return cachedOrRemote
+            }
+            // A stale signed URL or an unsupported cached representation should
+            // not leave the card permanently on its placeholder.
+            return await fetch(policy: .reloadIgnoringLocalCacheData)
         }
         inFlight[key] = task
         let loaded = await task.value
