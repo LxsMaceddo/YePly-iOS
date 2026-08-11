@@ -1461,9 +1461,6 @@ private struct CreatePackCodeView: View {
     @State private var artistKey = ""
     @State private var isWorking = false
     @State private var errorMessage: String?
-    @State private var availableOwnCards: [CollectibleCardItem]
-    @State private var availableCoinBalance: Int
-    @State private var isLoadingOwnData = false
 
     var body: some View {
         NavigationStack {
@@ -1546,6 +1543,9 @@ struct CreateCardTradeView: View {
     @State private var theirSort: CardTradeSort = .newest
     @State private var isWorking = false
     @State private var errorMessage: String?
+    @State private var availableOwnCards: [CollectibleCardItem]
+    @State private var availableCoinBalance: Int
+    @State private var isLoadingOwnData = false
 
     init(ownCards: [CollectibleCardItem], coinBalance: Int, initialUsername: String? = nil, onCreated: @escaping () -> Void) {
         self.ownCards = ownCards
