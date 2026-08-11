@@ -579,7 +579,9 @@ begin
       ) values (v_definition_id, auth.uid(), v_pack.id, v_rarity, v_score, v_version)
       returning id, card_instances.serial_number, card_instances.acquired_at
       into v_instance_id, v_serial, v_acquired;
-      delete from public.card_wishlist where user_id = auth.uid() and definition_id = v_definition_id;
+      delete from public.card_wishlist as wishlist
+      where wishlist.user_id = auth.uid()
+        and wishlist.definition_id = v_definition_id;
     end if;
 
     return query

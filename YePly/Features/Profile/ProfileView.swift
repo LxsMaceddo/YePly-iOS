@@ -23,16 +23,16 @@ struct ProfileView: View {
     @State private var profileScrollOffset: CGFloat = 0
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
-            ProfileHeroBackdrop(url: backgroundURL)
-                .frame(maxWidth: .infinity)
-                .frame(height: 565)
-                .offset(y: -1)
-                .ignoresSafeArea(edges: .top)
-                .opacity(Double(max(0, min(1, 1 + profileScrollOffset / 360))))
-            ScrollView {
-                VStack(spacing: 20) {
+        GeometryReader { viewport in
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
+                ProfileHeroBackdrop(url: backgroundURL)
+                    .frame(width: viewport.size.width, height: 565)
+                    .offset(y: -1)
+                    .ignoresSafeArea(edges: .top)
+                    .opacity(Double(max(0, min(1, 1 + profileScrollOffset / 360))))
+                ScrollView(.vertical) {
+                    VStack(spacing: 20) {
                     profileHero
                         .background {
                             GeometryReader { proxy in
@@ -117,12 +117,18 @@ struct ProfileView: View {
                             .frame(maxWidth: .infinity).frame(height: 50)
                             .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 15))
                     }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 40)
+                    // Remote and local profile photos keep their original pixel size.
+                    // Pinning the content to the viewport prevents those images from
+                    // expanding a vertical ScrollView beyond the iPhone's width.
+                    .frame(width: viewport.size.width)
+                    .clipped()
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 40)
+                .coordinateSpace(name: "profileScroll")
+                .onPreferenceChange(ProfileScrollOffsetKey.self) { profileScrollOffset = $0 }
             }
-            .coordinateSpace(name: "profileScroll")
-            .onPreferenceChange(ProfileScrollOffsetKey.self) { profileScrollOffset = $0 }
         }
         .navigationBarHidden(true)
         .sheet(isPresented: $showingEditor) {
@@ -258,7 +264,8 @@ private struct ProfileHeroBackdrop: View {
     let url: URL?
 
     var body: some View {
-        ZStack {
+        GeometryReader { viewport in
+            ZStack {
             LinearGradient(
                 colors: [YePlyTheme.accentSoft.opacity(0.54), YePlyTheme.accent.opacity(0.28), .black],
                 startPoint: .topLeading,
@@ -266,10 +273,18 @@ private struct ProfileHeroBackdrop: View {
             )
 
             if let url, url.isFileURL, let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image).resizable().scaledToFill()
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: viewport.size.width, height: viewport.size.height)
             } else if let url {
                 YePlyRemoteImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.18))) { phase in
-                    if case let .success(image) = phase { image.resizable().scaledToFill() }
+                    if case let .success(image) = phase {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: viewport.size.width, height: viewport.size.height)
+                    }
                 }
             }
 
@@ -283,8 +298,10 @@ private struct ProfileHeroBackdrop: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+            }
+            .frame(width: viewport.size.width, height: viewport.size.height)
+            .clipped()
         }
-        .clipped()
         .accessibilityHidden(true)
     }
 }
