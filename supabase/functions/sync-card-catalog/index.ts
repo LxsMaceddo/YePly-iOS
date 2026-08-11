@@ -10,6 +10,28 @@ const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
 const LISTENBRAINZ_BASE = "https://api.listenbrainz.org/1";
 const USER_AGENT = "YePly/2.4 (https://yeply.app)";
 
+// Spotify may expose the date of a later re-upload. For the curated catalogue,
+// YePly keeps the project's original release date so discographies stay historical.
+const canonicalReleaseDates = new Map<string, string>([
+  ["3ff2p3LnR6V7m6BinwhNaQ", "2004-02-10"],
+  ["4GRDFQ9HRoO0by8H0r2a3I", "2005-08-30"],
+  ["6V0srAdQfEIarFvIxAYilH", "2007-09-11"],
+  ["3WFTGIO6E3Xh4paEOBY9OU", "2008-11-24"],
+  ["20r762YmB5HeofjMCiPMLv", "2010-11-22"],
+  ["4P63UgNDUcF11MnWzyvVrh", "2011-08-08"],
+  ["0A3g19AGFd9Qe3rAIkP8e0", "2012-09-14"],
+  ["7D2NdGvBHIavgLhmcwhluK", "2013-06-18"],
+  ["7gsWAHLeT0w7es6FofOXk1", "2016-02-14"],
+  ["2Ek1q2haOnxVqhvVKqMvJe", "2018-06-01"],
+  ["1oK1GzEMNDjCt7EYYpomwc", "2018-06-08"],
+  ["0FgZKfoU2Br5sHOfvZKTI9", "2019-10-25"],
+  ["5CnpZV3q5BcESefcB3WJmz", "2021-08-29"],
+  ["0k7oanYS9dXYWLXaFOYxJ8", "2022-02-23"],
+  ["0k7ALIqqds5oGFtpMsaHLK", "2024-02-10"],
+  ["5RV2TNyjylqWJNxQyHBTeJ", "2024-08-03"],
+  ["3hwveWhYFxGDLy6K6xlwFh", "2026-06-19"],
+]);
+
 type KnownAlbum = {
   spotifyAlbumID: string;
   title: string;
@@ -56,7 +78,6 @@ const knownArtists: KnownArtist[] = [
       { releaseGroupMBID: "26584460-df1f-4a91-b036-8d0bf6f8ce95", spotifyAlbumID: "0k7oanYS9dXYWLXaFOYxJ8", title: "DONDA 2", expectedTrackCount: 20 },
       { releaseGroupMBID: "c4d999c3-983d-4149-8580-9ccb4567a12a", spotifyAlbumID: "0k7ALIqqds5oGFtpMsaHLK", title: "VULTURES 1", expectedTrackCount: 16 },
       { releaseGroupMBID: "d69250da-c94d-436d-bacf-7e52da48bc68", spotifyAlbumID: "5RV2TNyjylqWJNxQyHBTeJ", title: "VULTURES 2", expectedTrackCount: 16 },
-      { releaseGroupMBID: "56327267-51fb-472c-919e-d6ca258ebab2", spotifyAlbumID: "5poA9SAx0Xiz1cf17fWBLS", title: "BULLY", expectedTrackCount: 18 },
       { spotifyAlbumID: "3hwveWhYFxGDLy6K6xlwFh", title: "BULLY - DELUXE", expectedTrackCount: 20 },
     ],
   },
@@ -293,7 +314,14 @@ async function fetchSpotifyAlbum(albumID: string, token: string): Promise<Spotif
 function shouldImportDiscoveredAlbum(album: SpotifyAlbumSummary, artist: KnownArtist): boolean {
   if (!album.id || !album.name || album.album_type !== "album") return false;
   if (!(album.artists ?? []).some((credit) => credit.id && artist.spotifyIDs.includes(credit.id))) return false;
-  return !/karaoke|tribute|instrumental|commentary|podcast/i.test(album.name);
+  if (/karaoke|tribute|instrumental|commentary|podcast/i.test(album.name)) return false;
+
+  const key = albumKey(album.name);
+  // Keep one canonical edition so album progress and badges are not split.
+  if (key.startsWith("late orchestration")) return false;
+  if (key.startsWith("bully") && !key.includes("deluxe")) return false;
+  if (key.startsWith("watch the throne") && !key.includes("deluxe")) return false;
+  return true;
 }
 
 function chooseDiscoveredAlbums(items: SpotifyAlbumSummary[], artist: KnownArtist): SpotifyAlbumSummary[] {
@@ -338,7 +366,7 @@ function importedSpotifyAlbum(album: SpotifyAlbum, known?: KnownAlbum): Imported
   return {
     spotify_album_id: album.id,
     title: album.name.trim(),
-    release_date: normalizedReleaseDate(album.release_date),
+    release_date: canonicalReleaseDates.get(album.id) ?? normalizedReleaseDate(album.release_date),
     artwork_url: art,
     spotify_url: album.external_urls?.spotify ?? `https://open.spotify.com/album/${album.id}`,
     musicbrainz_release_group_id: known?.releaseGroupMBID,

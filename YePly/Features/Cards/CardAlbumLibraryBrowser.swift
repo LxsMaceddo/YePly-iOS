@@ -78,10 +78,23 @@ struct CardAlbumLibraryBrowser: View {
                     name: first.artistName,
                     artworkPath: first.artistArtworkPath,
                     sourceURL: first.artistSourceURL,
-                    albums: albums.sorted { $0.albumTitle.localizedStandardCompare($1.albumTitle) == .orderedAscending }
+                    albums: albums.sorted(by: chronologicalAlbumOrder)
                 )
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func chronologicalAlbumOrder(_ left: CardAlbumProgress, _ right: CardAlbumProgress) -> Bool {
+        switch (left.releaseDate, right.releaseDate) {
+        case let (leftDate?, rightDate?) where leftDate != rightDate:
+            return leftDate < rightDate
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return left.albumTitle.localizedStandardCompare(right.albumTitle) == .orderedAscending
+        }
     }
 }
 
@@ -353,6 +366,7 @@ private struct CardAlbumLibraryRow: View {
 
 private struct CardAlbumCollectionDetail: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedCard: CollectibleCardItem?
 
     let album: CardAlbumProgress
     let cards: [CollectibleCardItem]
@@ -371,7 +385,7 @@ private struct CardAlbumCollectionDetail: View {
                     .padding(.top, 8)
 
                 ForEach(ownedGroups) { group in
-                    Button { onSelectCard(group.card) } label: {
+                    Button { selectedCard = group.card } label: {
                         CardAlbumOwnedTrackRow(group: group)
                     }
                     .buttonStyle(.plain)
@@ -422,6 +436,9 @@ private struct CardAlbumCollectionDetail: View {
             }
         }
         .yeplyBackground()
+        .fullScreenCover(item: $selectedCard) { card in
+            NavigationStack { CardDetailSheet(card: card) }
+        }
     }
 
     private var albumHeader: some View {

@@ -126,6 +126,7 @@ struct CardAlbumProgress: Codable, Identifiable, Hashable, Sendable {
     var artistArtworkPath: String? = nil
     var artistSourceURL: String? = nil
     let artworkPath: String?
+    var releaseDate: String? = nil
     let ownedUnique: Int
     let totalCards: Int
     let isComplete: Bool
@@ -142,6 +143,7 @@ struct CardAlbumProgress: Codable, Identifiable, Hashable, Sendable {
         case artistArtworkPath = "artist_artwork_path"
         case artistSourceURL = "artist_source_url"
         case artworkPath = "artwork_path"
+        case releaseDate = "release_date"
         case ownedUnique = "owned_unique"
         case totalCards = "total_cards"
         case isComplete = "is_complete"

@@ -512,7 +512,7 @@ private struct CardCollectionListRow: View {
     }
 }
 
-private struct CardDetailSheet: View {
+struct CardDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     let card: CollectibleCardItem
     var body: some View {
