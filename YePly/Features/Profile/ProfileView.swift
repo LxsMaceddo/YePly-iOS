@@ -10,140 +10,103 @@ struct ProfileView: View {
     @State private var showingSignOut = false
     @State private var showingEditor = false
     @State private var avatarURL: URL?
+    @State private var backgroundURL: URL?
     @State private var socialProfile: UserProfile?
     @State private var equippedBadges: [EquippedAlbumBadge] = []
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                HStack {
-                    Text("Perfil").font(.system(size: 34, weight: .bold, design: .rounded))
-                    Spacer()
-                    Button { notifications.openCenter() } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell.fill").frame(width: 38, height: 38).background(YePlyTheme.elevated, in: Circle())
-                            if notifications.unreadCount > 0 {
-                                Text("\(min(notifications.unreadCount, 99))").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                                    .padding(4).background(.red, in: Circle()).offset(x: 4, y: -4)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 20) {
+                    profileHero
+
+                    if !equippedBadges.isEmpty {
+                        ProfileBadgeShowcase(badges: equippedBadges)
+                    }
+
+                    if let tastes = session.profile?.tastes, !tastes.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Sua assinatura musical", systemImage: "heart.fill")
+                                .font(.headline)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 8)], alignment: .leading, spacing: 8) {
+                                ForEach(tastes, id: \.self) { taste in
+                                    Text(taste).font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(height: 32)
+                                        .background(YePlyTheme.elevatedStrong, in: Capsule())
+                                }
                             }
                         }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(YePlyTheme.elevated.opacity(0.94), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     }
-                    .buttonStyle(.plain)
-                    NavigationLink { CardProfileShowcaseView() } label: {
-                        Image(systemName: "medal.star.fill")
-                            .frame(width: 38, height: 38)
-                            .background(YePlyTheme.elevated, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Badges e conquistas")
-                    YePlyLogo(size: 34)
-                }
-                .padding(.top, 18)
 
-                VStack(spacing: 13) {
-                    ProfileAvatarView(url: avatarURL, initials: initials, size: 104)
-                        .id(session.profile?.avatarPath)
-                    VStack(spacing: 5) {
-                        Text(session.profile?.displayName ?? "Usuário").font(.title2.bold())
-                        Text("@\(session.profile?.username ?? "yeply")").font(.subheadline).foregroundStyle(YePlyTheme.secondary)
+                    HStack(spacing: 10) {
+                        ProfileMetric(value: "\(offlineLibrary.downloadedPlaylistCount)", label: "Playlists offline", icon: "arrow.down.circle.fill")
+                        ProfileMetric(value: formattedOfflineSize, label: "No aparelho", icon: "internaldrive.fill")
                     }
-                    if let bio = session.profile?.bio, !bio.isEmpty {
-                        Text(bio).font(.subheadline).foregroundStyle(YePlyTheme.secondary).multilineTextAlignment(.center).padding(.horizontal, 14)
-                    }
-                    HStack(spacing: 8) {
+
+                    VStack(spacing: 0) {
                         if session.isAdmin {
-                            Label("Administrador", systemImage: "checkmark.shield.fill")
-                                .foregroundStyle(YePlyTheme.accent)
-                        }
-                        Button { showingEditor = true } label: {
-                            Label("Editar perfil", systemImage: "pencil")
-                        }
-                    }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.bordered)
-                }
-                .frame(maxWidth: .infinity)
-
-                if !equippedBadges.isEmpty {
-                    ProfileBadgeShowcase(badges: equippedBadges)
-                }
-
-                if let tastes = session.profile?.tastes, !tastes.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("MEUS GOSTOS").font(.caption2.bold()).tracking(1.7).foregroundStyle(YePlyTheme.tertiary)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 8)], alignment: .leading, spacing: 8) {
-                            ForEach(tastes, id: \.self) { taste in
-                                Text(taste).font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(height: 32)
-                                    .background(YePlyTheme.elevatedStrong, in: Capsule())
+                            NavigationLink { AdminDashboardView() } label: {
+                                ProfileRow(icon: "slider.horizontal.3", title: "Administração", subtitle: "Catálogo, uploads e artistas verificados")
                             }
+                            .buttonStyle(.plain)
+                            Divider().overlay(YePlyTheme.line).padding(.leading, 56)
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                HStack(spacing: 10) {
-                    ProfileMetric(value: "\(socialProfile?.followerCount ?? 0)", label: "Seguidores", icon: "person.2.fill")
-                    ProfileMetric(value: "\(socialProfile?.followingCount ?? 0)", label: "Seguindo", icon: "person.badge.plus")
-                }
-
-                HStack(spacing: 10) {
-                    ProfileMetric(value: "\(offlineLibrary.downloadedPlaylistCount)", label: "Playlists offline", icon: "arrow.down.circle.fill")
-                    ProfileMetric(value: formattedOfflineSize, label: "No aparelho", icon: "internaldrive.fill")
-                }
-
-                VStack(spacing: 0) {
-                    if session.isAdmin {
-                        NavigationLink { AdminDashboardView() } label: {
-                            ProfileRow(icon: "slider.horizontal.3", title: "Administração", subtitle: "Catálogo, uploads e artistas verificados")
+                        NavigationLink { PlaybackHistoryView() } label: {
+                            ProfileRow(icon: "clock.arrow.circlepath", title: "Histórico de reprodução", subtitle: "Veja tudo que você ouviu")
                         }
                         .buttonStyle(.plain)
                         Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        NavigationLink { PlaybackSettingsView() } label: {
+                            ProfileRow(icon: "slider.horizontal.3", title: "Configurações de reprodução", subtitle: "Sem atraso, fade in e fade out")
+                        }
+                        .buttonStyle(.plain)
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        NavigationLink { FavoriteCardArtistsView() } label: {
+                            ProfileRow(icon: "star.fill", title: "Artistas favoritos", subtitle: "Escolha os artistas dos packs de conquista")
+                        }
+                        .buttonStyle(.plain)
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Arquivos offline protegidos neste iPhone")
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        ProfileRow(icon: "questionmark.circle", title: "Ajuda e suporte", subtitle: "Fale com a equipe YePly")
+                        Divider().overlay(YePlyTheme.line).padding(.leading, 56)
+                        NavigationLink { LegalTermsView() } label: {
+                            ProfileRow(icon: "doc.text", title: "Termos e direitos autorais", subtitle: "Regras para músicas, cartas e comunidade")
+                        }
+                        .buttonStyle(.plain)
                     }
-                    NavigationLink { PlaybackHistoryView() } label: {
-                        ProfileRow(icon: "clock.arrow.circlepath", title: "Histórico de reprodução", subtitle: "Veja tudo que você ouviu")
-                    }
-                    .buttonStyle(.plain)
-                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                    NavigationLink { PlaybackSettingsView() } label: {
-                        ProfileRow(icon: "slider.horizontal.3", title: "Configurações de reprodução", subtitle: "Sem atraso, fade in e fade out")
-                    }
-                    .buttonStyle(.plain)
-                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                    NavigationLink { FavoriteCardArtistsView() } label: {
-                        ProfileRow(icon: "star.fill", title: "Artistas favoritos", subtitle: "Escolha os artistas dos packs de conquista")
-                    }
-                    .buttonStyle(.plain)
-                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                    ProfileRow(icon: "lock.shield", title: "Privacidade", subtitle: "Arquivos offline protegidos neste iPhone")
-                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                    ProfileRow(icon: "questionmark.circle", title: "Ajuda e suporte", subtitle: "Fale com a equipe YePly")
-                    Divider().overlay(YePlyTheme.line).padding(.leading, 56)
-                    NavigationLink { LegalTermsView() } label: {
-                        ProfileRow(icon: "doc.text", title: "Termos e direitos autorais", subtitle: "Regras para músicas, cartas e comunidade")
-                    }
-                    .buttonStyle(.plain)
-                }
-                .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(YePlyTheme.elevated.opacity(0.96), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
-                if container.isDemoBackend {
-                    Label("Modo demonstração — conecte o Supabase para habilitar contas e uploads reais.", systemImage: "hammer.fill")
-                        .font(.footnote).foregroundStyle(YePlyTheme.secondary).padding(15).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(YePlyTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
-                }
+                    if container.isDemoBackend {
+                        Label("Modo demonstração — conecte o Supabase para habilitar contas e uploads reais.", systemImage: "hammer.fill")
+                            .font(.footnote).foregroundStyle(YePlyTheme.secondary).padding(15).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(YePlyTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    }
 
-                Button(role: .destructive) { showingSignOut = true } label: {
-                    Label("Sair da conta", systemImage: "rectangle.portrait.and.arrow.right")
-                        .frame(maxWidth: .infinity).frame(height: 50)
-                        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 15))
+                    Button(role: .destructive) { showingSignOut = true } label: {
+                        Label("Sair da conta", systemImage: "rectangle.portrait.and.arrow.right")
+                            .frame(maxWidth: .infinity).frame(height: 50)
+                            .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 15))
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 40)
+                .background(alignment: .top) {
+                    ProfileHeroBackdrop(url: backgroundURL)
+                        .frame(height: 540)
+                        .offset(y: -24)
                 }
             }
-            .padding(.horizontal, 18).padding(.bottom, 40)
         }
         .navigationBarHidden(true)
         .sheet(isPresented: $showingEditor) {
             if let profile = session.profile { ProfileEditorView(profile: profile) }
         }
         .task(id: session.profile?.avatarPath) { avatarURL = await session.avatarURL() }
+        .task(id: session.profile?.backgroundPath) { backgroundURL = await session.backgroundURL() }
         .task(id: session.profile?.id) {
             guard offlineLibrary.isConnected, let id = session.profile?.id else { return }
             async let profile = container.repository.fetchProfile(id: id)
@@ -158,12 +121,138 @@ struct ProfileView: View {
         .yeplyBackground()
     }
 
+    private var profileHero: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("PERFIL").font(.caption2.bold()).tracking(2).foregroundStyle(.white.opacity(0.75))
+                Spacer()
+                profileToolbarButton(systemImage: "bell.fill", action: notifications.openCenter, badge: notifications.unreadCount)
+                NavigationLink { CardProfileShowcaseView() } label: {
+                    Image(systemName: "medal.star.fill")
+                        .frame(width: 42, height: 42)
+                        .background(.black.opacity(0.34), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.16)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Badges e conquistas")
+            }
+            .padding(.top, 18)
+
+            Spacer().frame(height: 58)
+
+            HStack(alignment: .center, spacing: 16) {
+                ProfileAvatarView(url: avatarURL, initials: initials, size: 96)
+                    .id(session.profile?.avatarPath)
+                    .overlay(Circle().stroke(.white.opacity(0.82), lineWidth: 3))
+                    .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(session.profile?.displayName ?? "Usuário")
+                        .font(.system(size: 27, weight: .black, design: .rounded))
+                        .lineLimit(1)
+                    HStack(spacing: 7) {
+                        Text("@\(session.profile?.username ?? "yeply")")
+                        if session.isAdmin {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(YePlyTheme.accent)
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.74))
+                }
+                Spacer()
+                Button { showingEditor = true } label: {
+                    Image(systemName: "pencil").font(.headline).frame(width: 42, height: 42)
+                        .background(.white, in: Circle()).foregroundStyle(.black)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Editar perfil")
+            }
+
+            if let bio = session.profile?.bio, !bio.isEmpty {
+                Text(bio)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(3)
+            }
+
+            HStack(spacing: 0) {
+                profileHeroMetric(value: socialProfile?.followerCount ?? 0, label: "seguidores")
+                Divider().frame(height: 34).overlay(.white.opacity(0.16))
+                profileHeroMetric(value: socialProfile?.followingCount ?? 0, label: "seguindo")
+                Divider().frame(height: 34).overlay(.white.opacity(0.16))
+                profileHeroMetric(value: equippedBadges.count, label: "badges")
+            }
+            .padding(.vertical, 13)
+            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.10)))
+        }
+        .frame(minHeight: 410, alignment: .top)
+    }
+
+    private func profileToolbarButton(systemImage: String, action: @escaping () -> Void, badge: Int) -> some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: systemImage).frame(width: 42, height: 42)
+                    .background(.black.opacity(0.34), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.16)))
+                if badge > 0 {
+                    Text("\(min(badge, 99))").font(.system(size: 9, weight: .black)).foregroundStyle(.white)
+                        .padding(4).background(.red, in: Circle()).offset(x: 4, y: -4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func profileHeroMetric(value: Int, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value.formatted()).font(.headline.monospacedDigit().bold())
+            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.58))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private var initials: String {
         (session.profile?.displayName ?? "Y P").split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased()
     }
 
     private var formattedOfflineSize: String {
         ByteCountFormatter.string(fromByteCount: offlineLibrary.downloadedSizeBytes, countStyle: .file)
+    }
+}
+
+private struct ProfileHeroBackdrop: View {
+    let url: URL?
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [YePlyTheme.accentSoft.opacity(0.54), YePlyTheme.accent.opacity(0.28), .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            if let url, url.isFileURL, let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else if let url {
+                YePlyRemoteImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.18))) { phase in
+                    if case let .success(image) = phase { image.resizable().scaledToFill() }
+                }
+            }
+
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.12), location: 0),
+                    .init(color: .black.opacity(0.18), location: 0.46),
+                    .init(color: .black.opacity(0.78), location: 0.78),
+                    .init(color: .black, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .clipped()
+        .accessibilityHidden(true)
     }
 }
 
@@ -266,8 +355,11 @@ private struct ProfileEditorView: View {
     @State private var bio: String
     @State private var tastesText: String
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var selectedBackgroundPhoto: PhotosPickerItem?
     @State private var avatarPreview: UIImage?
+    @State private var backgroundPreview: UIImage?
     @State private var currentAvatarURL: URL?
+    @State private var currentBackgroundURL: URL?
     @State private var isSaving = false
 
     let profile: UserProfile
@@ -293,6 +385,35 @@ private struct ProfileEditorView: View {
                             Label("Escolher foto", systemImage: "photo.on.rectangle")
                         }
                     }
+                }
+
+                Section {
+                    Group {
+                        if let backgroundPreview {
+                            Image(uiImage: backgroundPreview).resizable().scaledToFill()
+                        } else if let currentBackgroundURL, currentBackgroundURL.isFileURL,
+                                  let image = UIImage(contentsOfFile: currentBackgroundURL.path) {
+                            Image(uiImage: image).resizable().scaledToFill()
+                        } else if let currentBackgroundURL {
+                            YePlyRemoteImage(url: currentBackgroundURL) { phase in
+                                if case let .success(image) = phase { image.resizable().scaledToFill() }
+                                else { profileBackgroundPlaceholder }
+                            }
+                        } else {
+                            profileBackgroundPlaceholder
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 132)
+                    .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+
+                    PhotosPicker(selection: $selectedBackgroundPhoto, matching: .images) {
+                        Label("Escolher imagem de fundo", systemImage: "photo.fill.on.rectangle.fill")
+                    }
+                } header: {
+                    Text("Fundo do perfil")
+                } footer: {
+                    Text("A imagem aparece no topo e desaparece gradualmente para preto ao navegar pelo perfil.")
                 }
 
                 Section {
@@ -337,7 +458,18 @@ private struct ProfileEditorView: View {
                     avatarPreview = image
                 }
             }
-            .task { currentAvatarURL = await session.avatarURL() }
+            .onChange(of: selectedBackgroundPhoto) { _, photo in
+                Task {
+                    guard let data = try? await photo?.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+                    backgroundPreview = image
+                }
+            }
+            .task {
+                async let avatar = session.avatarURL()
+                async let background = session.backgroundURL()
+                currentAvatarURL = await avatar
+                currentBackgroundURL = await background
+            }
             .alert("Não foi possível salvar", isPresented: Binding(get: { session.errorMessage != nil }, set: { if !$0 { session.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(session.errorMessage ?? "") }
@@ -348,12 +480,28 @@ private struct ProfileEditorView: View {
         displayName.split(separator: " ").prefix(2).compactMap { $0.first }.map(String.init).joined().uppercased()
     }
 
+    private var profileBackgroundPlaceholder: some View {
+        LinearGradient(
+            colors: [YePlyTheme.accentSoft.opacity(0.75), YePlyTheme.accent.opacity(0.52), .black],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay(Image(systemName: "photo.on.rectangle.angled").font(.title).foregroundStyle(.white.opacity(0.7)))
+    }
+
     private func save() {
         isSaving = true
         let tastes = tastesText.split(separator: ",").map(String.init)
         let jpeg = avatarPreview.flatMap(makeAvatarJPEG)
+        let backgroundJPEG = backgroundPreview.flatMap(makeBackgroundJPEG)
         Task {
-            if await session.updateProfile(displayName: displayName, bio: bio, tastes: tastes, avatarJPEG: jpeg) { dismiss() }
+            if await session.updateProfile(
+                displayName: displayName,
+                bio: bio,
+                tastes: tastes,
+                avatarJPEG: jpeg,
+                backgroundJPEG: backgroundJPEG
+            ) { dismiss() }
             isSaving = false
         }
     }
@@ -374,6 +522,24 @@ private struct ProfileEditorView: View {
             image.draw(in: CGRect(origin: origin, size: drawSize))
         }
         return normalized.jpegData(compressionQuality: 0.84)
+    }
+
+    private func makeBackgroundJPEG(_ image: UIImage) -> Data? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        let target = CGSize(width: 1_440, height: 1_080)
+        let scale = max(target.width / image.size.width, target.height / image.size.height)
+        let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let origin = CGPoint(x: (target.width - drawSize.width) / 2, y: (target.height - drawSize.height) / 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
+        let normalized = renderer.image { context in
+            UIColor.black.setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: target))
+            image.draw(in: CGRect(origin: origin, size: drawSize))
+        }
+        return normalized.jpegData(compressionQuality: 0.80)
     }
 }
 

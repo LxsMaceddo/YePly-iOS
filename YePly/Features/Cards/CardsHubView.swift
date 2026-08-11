@@ -183,7 +183,7 @@ struct CardsHubView: View {
             if model.dashboard.dailyClaimAvailable { await model.claimDaily(repository: container.repository) }
             if model.dashboard.favoriteArtists.isEmpty { showingFavorites = true }
         }
-        .sheet(item: $selectedCard) { card in
+        .fullScreenCover(item: $selectedCard) { card in
             NavigationStack { CardDetailSheet(card: card) }
         }
         .sheet(isPresented: $showingFavorites) {
@@ -234,6 +234,7 @@ struct CardsHubView: View {
     private var cardArtworkResolver: YePlyCardArtworkResolver {
         { card in
             guard let path = card.artworkPath else { return nil }
+            if let url = URL(string: path), url.scheme?.lowercased() == "https" { return url }
             return try? await container.repository.signedCoverURL(path: path)
         }
     }
@@ -415,9 +416,19 @@ private struct ResolvedCollectibleCard: View {
     let style: CollectibleCardStyle
     @State private var artworkURL: URL?
 
+    init(card: CollectibleCardItem, style: CollectibleCardStyle) {
+        self.card = card
+        self.style = style
+        let directURL = card.artworkPath
+            .flatMap { URL(string: $0) }
+            .flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
+        _artworkURL = State(initialValue: directURL)
+    }
+
     var body: some View {
         CollectibleCardView(model: displayModel, style: style)
             .task(id: card.artworkPath) {
+                if artworkURL != nil { return }
                 guard let path = card.artworkPath else { return }
                 artworkURL = try? await container.repository.signedCoverURL(path: path)
             }
@@ -505,37 +516,61 @@ private struct CardDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     let card: CollectibleCardItem
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ResolvedCollectibleCard(card: card, style: .detailed)
-                if card.catalogSource != nil {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Popularidade global", systemImage: "chart.bar.fill")
-                            .font(.headline)
-                        HStack {
-                            metric("Reproduções", value: card.globalListenCount)
-                            Divider().frame(height: 32)
-                            metric("Ouvintes", value: card.globalListenerCount)
-                            Divider().frame(height: 32)
-                            metric("Ranking", value: card.artistPopularityRank, suffix: card.artistCatalogSize.map { "/\($0)" })
-                        }
-                        NavigationLink {
-                            CardYePlyTrackSearchView(card: card)
-                        } label: {
-                            Label("Buscar música nas playlists do YePly", systemImage: "magnifyingglass")
-                                .frame(maxWidth: .infinity).frame(height: 44)
-                        }
-                        .buttonStyle(.borderedProminent).tint(YePlyTheme.accent)
+        ZStack {
+            LinearGradient(
+                colors: [card.rarity.accentColor.opacity(0.32), Color.black.opacity(0.96), .black],
+                startPoint: .topLeading,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 20) {
+                    VStack(spacing: 5) {
+                        Text("YEPLY ARCHIVE").font(.caption2.bold()).tracking(2).foregroundStyle(card.rarity.accentColor)
+                        Text("Uma edição da sua coleção").font(.caption).foregroundStyle(.white.opacity(0.58))
                     }
-                    .padding(14)
-                    .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 18))
+                    .padding(.top, 10)
+
+                    ResolvedCollectibleCard(card: card, style: .detailed)
+
+                    if card.catalogSource != nil {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Label("Pulso da música", systemImage: "chart.bar.xaxis.ascending")
+                                .font(.headline)
+                            HStack {
+                                metric("Reproduções", value: card.globalListenCount)
+                                Divider().frame(height: 34)
+                                metric("Ouvintes", value: card.globalListenerCount)
+                                Divider().frame(height: 34)
+                                metric("No artista", value: card.artistPopularityRank, suffix: card.artistCatalogSize.map { "/\($0)" })
+                            }
+                            NavigationLink {
+                                CardYePlyTrackSearchView(card: card)
+                            } label: {
+                                Label("Encontrar no YePly", systemImage: "magnifyingglass")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity).frame(height: 50)
+                            }
+                            .buttonStyle(.borderedProminent).tint(card.rarity.accentColor)
+                        }
+                        .padding(16)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.09)))
+                    }
                 }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 38)
             }
-            .padding(18)
         }
-            .navigationTitle("Carta #\(card.serialNumber)").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
-            .yeplyBackground()
+        .navigationTitle("Carta #\(card.serialNumber.formatted())").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Fechar") { dismiss() }.fontWeight(.semibold)
+            }
+        }
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .preferredColorScheme(.dark)
     }
 
     private func metric(_ title: String, value: Int?, suffix: String? = nil) -> some View {

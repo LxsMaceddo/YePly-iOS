@@ -21,6 +21,7 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
     var displayName: String
     var username: String
     var avatarPath: String?
+    var backgroundPath: String? = nil
     var bio: String?
     var tastes: [String]?
     var role: UserRole
@@ -34,6 +35,7 @@ struct UserProfile: Codable, Identifiable, Hashable, Sendable {
         case displayName = "display_name"
         case username
         case avatarPath = "avatar_path"
+        case backgroundPath = "background_path"
         case bio
         case tastes
         case role

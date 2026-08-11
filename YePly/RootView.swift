@@ -127,7 +127,7 @@ struct MainTabView: View {
                     MiniPlayerView { showingNowPlaying = true }
                         .offset(y: miniPlayerDragOffset)
                         .opacity(1 - Double(min(miniPlayerDragOffset / 180, 0.55)))
-                        .simultaneousGesture(miniPlayerDismissGesture)
+                        .highPriorityGesture(miniPlayerDismissGesture)
                         .accessibilityHint("Deslize para baixo para esconder o player")
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -143,7 +143,7 @@ struct MainTabView: View {
                 offset = max(0, value.translation.height)
             }
             .onEnded { value in
-                guard value.translation.height > 45 || value.predictedEndTranslation.height > 100 else { return }
+                guard value.translation.height > 58 || value.predictedEndTranslation.height > 130 else { return }
                 withAnimation(.snappy) { isMiniPlayerHidden = true }
             }
     }

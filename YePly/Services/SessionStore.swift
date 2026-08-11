@@ -6,12 +6,14 @@ private struct ProfileUpdatePayload: Encodable, Sendable {
     let bio: String?
     let tastes: [String]
     let avatarPath: String?
+    let backgroundPath: String?
 
     enum CodingKeys: String, CodingKey {
         case displayName = "display_name"
         case bio
         case tastes
         case avatarPath = "avatar_path"
+        case backgroundPath = "background_path"
     }
 }
 
@@ -98,7 +100,13 @@ final class SessionStore: ObservableObject {
         state = .signedIn
     }
 
-    func updateProfile(displayName: String, bio: String, tastes: [String], avatarJPEG: Data?) async -> Bool {
+    func updateProfile(
+        displayName: String,
+        bio: String,
+        tastes: [String],
+        avatarJPEG: Data?,
+        backgroundJPEG: Data?
+    ) async -> Bool {
         errorMessage = nil
         guard var current = profile else { errorMessage = YePlyError.noActiveUser.localizedDescription; return false }
         let cleanName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -112,14 +120,22 @@ final class SessionStore: ObservableObject {
             current.displayName = cleanName
             current.bio = cleanBio.isEmpty ? nil : cleanBio
             current.tastes = cleanTastes
+            if let avatarJPEG {
+                current.avatarPath = "demo/avatar"
+                try? saveLocalAvatar(avatarJPEG, userID: current.id)
+            }
+            if let backgroundJPEG {
+                current.backgroundPath = "demo/background"
+                try? saveLocalBackground(backgroundJPEG, userID: current.id)
+            }
             profile = current
-            if let avatarJPEG { try? saveLocalAvatar(avatarJPEG, userID: current.id) }
             return true
         }
 
         guard let client else { return false }
         var newAvatarPath = current.avatarPath
-        var uploadedPath: String?
+        var newBackgroundPath = current.backgroundPath
+        var uploadedPaths: [String] = []
         do {
             if let avatarJPEG {
                 guard avatarJPEG.count <= 5 * 1_024 * 1_024 else { throw YePlyError.message("A foto de perfil deve ter no máximo 5 MB.") }
@@ -129,19 +145,41 @@ final class SessionStore: ObservableObject {
                     data: avatarJPEG,
                     options: FileOptions(cacheControl: "86400", contentType: "image/jpeg", upsert: false)
                 )
-                uploadedPath = path
+                uploadedPaths.append(path)
                 newAvatarPath = path
             }
 
-            let payload = ProfileUpdatePayload(displayName: cleanName, bio: cleanBio.isEmpty ? nil : cleanBio, tastes: cleanTastes, avatarPath: newAvatarPath)
+            if let backgroundJPEG {
+                guard backgroundJPEG.count <= 5 * 1_024 * 1_024 else {
+                    throw YePlyError.message("A imagem de fundo deve ter no máximo 5 MB.")
+                }
+                let path = "\(current.id.uuidString.lowercased())/background/\(UUID().uuidString.lowercased()).jpg"
+                try await client.storage.from("avatars").upload(
+                    path,
+                    data: backgroundJPEG,
+                    options: FileOptions(cacheControl: "86400", contentType: "image/jpeg", upsert: false)
+                )
+                uploadedPaths.append(path)
+                newBackgroundPath = path
+            }
+
+            let payload = ProfileUpdatePayload(
+                displayName: cleanName,
+                bio: cleanBio.isEmpty ? nil : cleanBio,
+                tastes: cleanTastes,
+                avatarPath: newAvatarPath,
+                backgroundPath: newBackgroundPath
+            )
             let updated: UserProfile = try await client.from("profiles").update(payload).eq("id", value: current.id).select().single().execute().value
             if let avatarJPEG { try saveLocalAvatar(avatarJPEG, userID: current.id) }
+            if let backgroundJPEG { try saveLocalBackground(backgroundJPEG, userID: current.id) }
             if let oldPath = current.avatarPath, oldPath != newAvatarPath { try? await client.storage.from("avatars").remove(paths: [oldPath]) }
+            if let oldPath = current.backgroundPath, oldPath != newBackgroundPath { try? await client.storage.from("avatars").remove(paths: [oldPath]) }
             profile = updated
             cache(updated)
             return true
         } catch {
-            if let uploadedPath { try? await client.storage.from("avatars").remove(paths: [uploadedPath]) }
+            if !uploadedPaths.isEmpty { try? await client.storage.from("avatars").remove(paths: uploadedPaths) }
             errorMessage = friendly(error)
             return false
         }
@@ -157,6 +195,20 @@ final class SessionStore: ObservableObject {
             let (data, response) = try await URLSession.shared.data(from: remoteURL)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
             try saveLocalAvatar(data, userID: profile.id)
+            return localURL
+        } catch { return nil }
+    }
+
+    func backgroundURL() async -> URL? {
+        guard let profile, profile.backgroundPath != nil else { return nil }
+        let localURL = localBackgroundURL(userID: profile.id)
+        if FileManager.default.fileExists(atPath: localURL.path) { return localURL }
+        guard let client, let path = profile.backgroundPath else { return nil }
+        do {
+            let remoteURL = try await client.storage.from("avatars").createSignedURL(path: path, expiresIn: 600)
+            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
+            try saveLocalBackground(data, userID: profile.id)
             return localURL
         } catch { return nil }
     }
@@ -201,8 +253,23 @@ final class SessionStore: ObservableObject {
         return directory.appendingPathComponent("\(userID.uuidString.lowercased()).jpg")
     }
 
+    private func localBackgroundURL(userID: UUID) -> URL {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("YePlyProfiles", isDirectory: true)
+        return directory.appendingPathComponent("\(userID.uuidString.lowercased())-background.jpg")
+    }
+
     private func saveLocalAvatar(_ data: Data, userID: UUID) throws {
         let url = localAvatarURL(userID: userID)
+        try saveLocalProfileImage(data, at: url)
+    }
+
+    private func saveLocalBackground(_ data: Data, userID: UUID) throws {
+        let url = localBackgroundURL(userID: userID)
+        try saveLocalProfileImage(data, at: url)
+    }
+
+    private func saveLocalProfileImage(_ data: Data, at url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
         try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: url.path)

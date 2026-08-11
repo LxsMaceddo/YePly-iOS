@@ -235,17 +235,13 @@ private struct CardArtistAlbumsSheet: View {
                 .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("DISCOGRAFIA")
+                    Text("ARQUIVO DO ARTISTA")
                         .font(.caption2.bold())
                         .tracking(1.4)
                         .foregroundStyle(YePlyTheme.accent)
-                    Text("\(artist.ownedCards) de \(artist.totalCards) cartas únicas")
+                    Text("\(artist.albums.count) álbuns · \(artist.ownedCards) de \(artist.totalCards) cartas")
                         .font(.headline)
-                    if let sourceURL = artist.sourceURL, let url = URL(string: sourceURL) {
-                        Link("Imagem do Spotify", destination: url)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.green)
-                    }
+                        .lineLimit(2)
                 }
 
                 Spacer()
@@ -258,7 +254,14 @@ private struct CardArtistAlbumsSheet: View {
                 .tint(artist.progress >= 1 ? .green : YePlyTheme.accent)
         }
         .padding(16)
-        .background(YePlyTheme.elevatedStrong, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(YePlyTheme.elevatedStrong)
+                .overlay {
+                    LinearGradient(colors: [YePlyTheme.accent.opacity(0.16), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+        }
     }
 
     private func cardsForAlbum(_ album: CardAlbumProgress) -> [CollectibleCardItem] {
@@ -288,31 +291,32 @@ private struct CardAlbumLibraryRow: View {
     let cards: [CollectibleCardItem]
 
     var body: some View {
-        HStack(spacing: 13) {
+        HStack(spacing: 15) {
             CardBrowserArtwork(
                 path: album.artworkPath ?? cards.first?.artworkPath,
                 seed: album.id.uuidString,
                 title: album.albumTitle,
                 tint: album.isComplete ? .green : YePlyTheme.accentSoft,
-                cornerRadius: 16
+                cornerRadius: 18
             )
-            .frame(width: 76, height: 76)
+            .frame(width: 88, height: 88)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text(album.albumTitle)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if album.isComplete {
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(.green)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(album.albumTitle)
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-                Text("\(album.ownedUnique) de \(album.totalCards) músicas")
-                    .font(.caption)
-                    .foregroundStyle(YePlyTheme.secondary)
+                Text(album.artistName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.55))
+
+                Text("\(album.ownedUnique)/\(album.totalCards) faixas")
+                    .font(.caption.monospacedDigit().bold())
+                    .foregroundStyle(album.isComplete ? .black : .white.opacity(0.78))
+                    .padding(.horizontal, 10)
+                    .frame(height: 27)
+                    .background(album.isComplete ? Color.green : Color.white.opacity(0.09), in: Capsule())
 
                 ProgressView(value: album.progress)
                     .tint(album.isComplete ? .green : YePlyTheme.accent)
@@ -320,12 +324,29 @@ private struct CardAlbumLibraryRow: View {
 
             Spacer(minLength: 4)
 
-            Image(systemName: "chevron.right")
-                .font(.caption.bold())
-                .foregroundStyle(YePlyTheme.tertiary)
+            if album.isComplete {
+                Image(systemName: "checkmark")
+                    .font(.headline.bold())
+                    .foregroundStyle(.black)
+                    .frame(width: 36, height: 36)
+                    .background(.green, in: Circle())
+            } else {
+                VStack(spacing: 5) {
+                    Text("FALTAM")
+                        .font(.system(size: 8, weight: .bold)).tracking(1).foregroundStyle(YePlyTheme.tertiary)
+                    Text("\(max(album.totalCards - album.ownedUnique, 0))")
+                        .font(.headline.monospacedDigit().bold()).foregroundStyle(YePlyTheme.accent)
+                    Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(YePlyTheme.tertiary)
+                }
+                .frame(width: 44)
+            }
         }
-        .padding(11)
-        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(10)
+        .background(YePlyTheme.elevated, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(album.isComplete ? Color.green.opacity(0.20) : Color.white.opacity(0.055))
+        }
         .contentShape(Rectangle())
     }
 }

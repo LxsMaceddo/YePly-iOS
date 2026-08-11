@@ -487,9 +487,24 @@ private struct ResolvedPackCard: View {
 
     @State private var artworkURL: URL?
 
+    init(
+        card: CollectibleCardItem,
+        style: CollectibleCardStyle = .detailed,
+        artworkResolver: @escaping YePlyCardArtworkResolver
+    ) {
+        self.card = card
+        self.style = style
+        self.artworkResolver = artworkResolver
+        let directURL = card.artworkPath
+            .flatMap { URL(string: $0) }
+            .flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
+        _artworkURL = State(initialValue: directURL)
+    }
+
     var body: some View {
         CollectibleCardView(model: displayModel, style: style)
             .task(id: card.artworkPath) {
+                if artworkURL != nil { return }
                 artworkURL = await artworkResolver(card)
             }
     }

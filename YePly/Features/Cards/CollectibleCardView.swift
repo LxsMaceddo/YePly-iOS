@@ -157,39 +157,51 @@ public struct CollectibleCardView: View {
     }
 
     private var detailedCard: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                rarityLabel(compact: false)
-                Spacer(minLength: 8)
-                Image(systemName: "waveform")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(YePlyTheme.tertiary)
-                    .accessibilityHidden(true)
-                Spacer(minLength: 8)
-                Text(model.formattedSerialNumber)
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    .foregroundStyle(YePlyTheme.secondary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 14)
+        ZStack {
+            artwork(cornerRadius: 30)
 
-            artwork(cornerRadius: 22)
-                .aspectRatio(1, contentMode: .fit)
-                .padding(.horizontal, 16)
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.08), location: 0),
+                    .init(color: .clear, location: 0.40),
+                    .init(color: .black.opacity(0.46), location: 0.63),
+                    .init(color: .black.opacity(0.96), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    rarityLabel(compact: false)
+                    Spacer()
+                    Label("YEPLY", systemImage: "waveform")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.82))
+                    Text(model.formattedSerialNumber)
+                        .font(.system(size: 13, weight: .black, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.78))
+                }
+
+                Spacer(minLength: 130)
+
+                HStack(alignment: .bottom, spacing: 12) {
+                    Rectangle()
+                        .fill(rarityGradient)
+                        .frame(width: 4, height: 62)
+                        .clipShape(Capsule())
+
+                    VStack(alignment: .leading, spacing: 5) {
                         Text(model.title)
-                            .font(.system(size: 25, weight: .black, design: .rounded))
+                            .font(.system(size: 27, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
                             .lineLimit(2)
-                            .minimumScaleFactor(0.72)
-
+                            .minimumScaleFactor(0.70)
                         Text(model.artistName)
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(YePlyTheme.secondary)
+                            .foregroundStyle(.white.opacity(0.68))
                             .lineLimit(1)
                     }
 
@@ -200,9 +212,8 @@ public struct CollectibleCardView: View {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundStyle(.black)
-                                .frame(width: 42, height: 42)
-                                .background(.white)
-                                .clipShape(Circle())
+                                .frame(width: 43, height: 43)
+                                .background(.white, in: Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Reproduzir \(model.title)")
@@ -210,56 +221,44 @@ public struct CollectibleCardView: View {
                 }
 
                 HStack(spacing: 7) {
-                    metadataPill(icon: model.rarity.symbolName, text: model.rarity.title, tint: model.rarity.primaryColor)
+                    metadataPill(icon: "square.stack.fill", text: model.albumName, tint: .white.opacity(0.82))
                     if let genre = model.genre, !genre.isEmpty {
                         metadataPill(icon: "music.note", text: genre, tint: YePlyTheme.accent)
                     }
-                    metadataPill(icon: "square.stack.fill", text: model.albumName, tint: YePlyTheme.secondary)
                 }
-
-                Divider().overlay(YePlyTheme.line)
+                .padding(.top, 13)
 
                 HStack(spacing: 10) {
                     Circle()
                         .fill(rarityGradient)
-                        .frame(width: 34, height: 34)
-                        .overlay {
-                            Text(ownerInitial)
-                                .font(.system(size: 14, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                        }
-                        .accessibilityHidden(true)
+                        .frame(width: 32, height: 32)
+                        .overlay(Text(ownerInitial).font(.caption.bold()).foregroundStyle(.white))
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(model.ownerUsername == nil ? "Carta disponível" : "Pertence a")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(YePlyTheme.tertiary)
-                        Text(model.ownerUsername.map { "@\($0)" } ?? "YePly")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
+                        Text(model.ownerUsername == nil ? "EDIÇÃO YEPLY" : "COLEÇÃO DE")
+                            .font(.system(size: 8, weight: .bold)).tracking(1.2).foregroundStyle(.white.opacity(0.44))
+                        Text(model.ownerUsername.map { "@\($0)" } ?? "Carta oficial da coleção")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.82)).lineLimit(1)
                     }
-
                     Spacer()
-
                     Label(model.favoriteCount.formatted(), systemImage: "heart.fill")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(YePlyTheme.secondary)
-
+                        .font(.caption.bold()).foregroundStyle(.white.opacity(0.64))
                     if model.isLocked {
-                        Image(systemName: "lock.fill")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(model.rarity.primaryColor)
-                            .accessibilityLabel("Carta bloqueada para trocas")
+                        Image(systemName: "lock.fill").foregroundStyle(model.rarity.primaryColor)
                     }
                 }
+                .padding(.top, 14)
             }
             .padding(18)
         }
-        .background(cardBackground)
-        .overlay(cardBorder(cornerRadius: 28))
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: model.rarity.primaryColor.opacity(reduceTransparency ? 0.10 : 0.28), radius: 22, y: 10)
+        .aspectRatio(0.67, contentMode: .fit)
+        .background(model.rarity.primaryColor.opacity(0.14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(rarityGradient, lineWidth: differentiateWithoutColor ? 3 : 1.6)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .shadow(color: model.rarity.primaryColor.opacity(reduceTransparency ? 0.12 : 0.42), radius: 30, y: 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityDescription)
     }
